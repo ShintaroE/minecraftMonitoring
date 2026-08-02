@@ -1,7 +1,52 @@
+import { useEffect, useState } from "react";
 import { Dashboard } from "./pages/Dashboard";
+import { Files } from "./pages/Files";
+import { ServerSwitcher } from "./components/ServerSwitcher";
+import { ServerControls } from "./components/ServerControls";
+import { useServers } from "./hooks/useServers";
+
+type Tab = "dashboard" | "files";
 
 function App() {
-  return <Dashboard />;
+  const { servers, loading: serversLoading, refresh: refreshServers } = useServers();
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [tab, setTab] = useState<Tab>("dashboard");
+  const selectedServer = servers.find((s) => s.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (selectedId === null && servers.length > 0) {
+      setSelectedId(servers[0].id);
+    }
+  }, [servers, selectedId]);
+
+  return (
+    <div className="dashboard">
+      <header className="dashboard-header">
+        <div className="dashboard-header-left">
+          <h1>minecraftMonitoring</h1>
+          <nav className="tabs">
+            <button className={tab === "dashboard" ? "active" : ""} onClick={() => setTab("dashboard")}>
+              ダッシュボード
+            </button>
+            <button className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
+              ファイル
+            </button>
+          </nav>
+        </div>
+        <div className="dashboard-header-controls">
+          <ServerSwitcher
+            servers={servers}
+            loading={serversLoading}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+          />
+          <ServerControls server={selectedServer} onChanged={refreshServers} />
+        </div>
+      </header>
+
+      {tab === "dashboard" ? <Dashboard /> : <Files server={selectedServer} />}
+    </div>
+  );
 }
 
 export default App;

@@ -1,14 +1,20 @@
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
+import multipart from "@fastify/multipart";
 import { env } from "./env.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { serverRoutes } from "./routes/servers.js";
+import { fileRoutes } from "./routes/files.js";
+
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
 
 const app = Fastify({ logger: true });
 
 await app.register(websocket);
+await app.register(multipart, { limits: { fileSize: MAX_UPLOAD_BYTES } });
 await app.register(metricsRoutes);
 await app.register(serverRoutes);
+await app.register(fileRoutes);
 
 app.get("/api/health", async () => ({ ok: true }));
 

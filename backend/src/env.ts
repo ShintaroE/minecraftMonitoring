@@ -6,6 +6,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3000),
   DOCKER_PROXY_HOST: z.string().default("docker-socket-proxy"),
   DOCKER_PROXY_PORT: z.coerce.number().default(2375),
+  SHARED_ROOT: z.string().default("/mnt/docker-root"),
 });
 
 export const env = envSchema.parse(process.env);

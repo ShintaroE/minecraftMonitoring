@@ -11,7 +11,7 @@
 - DB: **PostgreSQL**
 - リバースプロキシ: **Caddy**（nginxでも技術的には代替可。VPN内単一アプリ+WebSocket用途ではCaddyの方が設定量が少ないため引き続き推奨）
 
-> **実装状況（随時更新）**: Phase 1〜3（ダッシュボード、サーバー自動検出+切替UI、start/stop/restart）実装・動作確認済み。認証は要件から外れたため未実装（5章参照）。次はPhase 4（ファイル管理）。
+> **実装状況（随時更新）**: Phase 1〜4（ダッシュボード、サーバー自動検出+切替UI、start/stop/restart、ファイル一覧/DL/アップロード）実装・動作確認済み。認証は要件から外れたため未実装（5章参照）。次はPhase 5（rename/move/delete）。
 
 ---
 
@@ -129,14 +129,16 @@ minecraftMonitoring/
 │   ├── src/
 │   │   ├── routes/
 │   │   │   ├── metrics.ts       # WS: ホストCPU/Mem配信
-│   │   │   └── servers.ts       # GET /api/servers、POST /api/servers/:id/{start,stop,restart}
-│   │   │       ↳ 今後追加: files.ts
+│   │   │   ├── servers.ts       # GET /api/servers、POST /api/servers/:id/{start,stop,restart}
+│   │   │   └── files.ts         # GET一覧/download、POST upload
 │   │   ├── services/
 │   │   │   ├── metricsCollector.ts
 │   │   │   ├── dockerClient.ts     # dockerode（docker-socket-proxy経由）
 │   │   │   ├── serverDiscovery.ts  # label検出 + servers upsert
-│   │   │   └── dockerControl.ts    # start/stop/restart
-│   │   │       ↳ 今後追加: rcon.ts / fsSafe.ts
+│   │   │   ├── dockerControl.ts    # start/stop/restart
+│   │   │   ├── serverLookup.ts     # id→serversレコード取得の共通ヘルパー
+│   │   │   └── fsSafe.ts           # パストラバーサル対策込みパス解決
+│   │   │       ↳ 今後追加: rcon.ts
 │   │   ├── db/
 │   │   │   ├── schema.ts       # servers のみ
 │   │   │   └── migrations/
@@ -146,12 +148,15 @@ minecraftMonitoring/
 ├── frontend/
 │   ├── src/
 │   │   ├── pages/
-│   │   │   └── Dashboard.tsx
+│   │   │   ├── Dashboard.tsx
+│   │   │   └── Files.tsx           # ファイルブラウザ（一覧/DL/アップロード）
 │   │   ├── components/
 │   │   │   ├── ServerSwitcher.tsx
 │   │   │   └── ServerControls.tsx  # 起動/停止/再起動ボタン
-│   │   ├── api/servers.ts
-│   │   └── hooks/ (useMetricsSocket.ts, useServers.ts)
+│   │   ├── api/ (servers.ts, files.ts)
+│   │   ├── lib/format.ts           # formatBytes / formatDateTime
+│   │   ├── hooks/ (useMetricsSocket.ts, useServers.ts)
+│   │   └── App.tsx                 # ヘッダー（サーバー切替+操作+タブ）を集約するレイアウト
 │   └── package.json
 └── (DBデータは postgres コンテナの named volume `pgdata` で永続化)
 ```
@@ -171,18 +176,24 @@ minecraftMonitoring/
 
 ---
 
-## 6. ファイル管理機能（Phase 4以降で実装予定）
+## 6. ファイル管理機能
 
-### API例（すべて `server_id` でスコープ）
-| メソッド | パス | 説明 |
-|---|---|---|
-| GET | `/api/servers/:id/files?path=` | ディレクトリ一覧 |
-| GET | `/api/servers/:id/files/download?path=` | 単一ファイルDL（ストリーム） |
-| GET | `/api/servers/:id/files/download-zip?path=` | フォルダをzip化してストリームDL |
-| POST | `/api/servers/:id/files/upload?path=` | アップロード（multipart, ストリーム保存） |
-| POST | `/api/servers/:id/files/rename` | `{from, to}` |
-| POST | `/api/servers/:id/files/move` | `{from, to}` |
-| DELETE | `/api/servers/:id/files?path=` | 削除（フロントで確認ダイアログ必須） |
+### API（すべて `server_id` でスコープ）
+| メソッド | パス | 説明 | 状態 |
+|---|---|---|---|
+| GET | `/api/servers/:id/files?path=` | ディレクトリ一覧 | 実装済み（Phase 4） |
+| GET | `/api/servers/:id/files/download?path=` | 単一ファイルDL（ストリーム） | 実装済み（Phase 4） |
+| POST | `/api/servers/:id/files/upload?path=` | アップロード（multipart, ストリーム保存） | 実装済み（Phase 4） |
+| GET | `/api/servers/:id/files/download-zip?path=` | フォルダをzip化してストリームDL | 未実装（Phase 5候補） |
+| POST | `/api/servers/:id/files/rename` | `{from, to}` | 未実装（Phase 5） |
+| POST | `/api/servers/:id/files/move` | `{from, to}` | 未実装（Phase 5） |
+| DELETE | `/api/servers/:id/files?path=` | 削除（フロントで確認ダイアログ必須） | 未実装（Phase 5） |
+
+**Phase 4実装メモ**:
+- 共有ルートは`/home/maki/docker`をapp-backendに`rw`マウント（`SHARED_ROOT=/mnt/docker-root`）。3.3章の設計通り、新サーバー追加時もmount追記不要。
+- シンボリックリンクは一覧から除外し、`fs.realpath`で解決した実体パスが共有ルート外を指す場合も拒否（`services/fsSafe.ts`）。パストラバーサル（`../`や`%2e%2e`等）は実機で400になることを確認済み。
+- アップロードのファイル名は`path.basename()`のみ使用し、ファイル名経由のディレクトリトラバーサルを防止。アップロード上限は2GB（`@fastify/multipart`の`limits.fileSize`）。
+- 稼働中サーバーへの書き込み（アップロード）に制限は設けていない（下記セキュリティ設計の「稼働中は制限」は未実装のまま）。実際にworldフォルダ稼働中に書き込むとどうなるかは未検証。運用上は「アップロードはサーバー停止中に行う」を当面のルールとして推奨。
 
 ### セキュリティ設計（最重要）
 - 操作対象パスは常に「共有ルート(`/home/maki/docker`) + 対象サーバーの `data_path`」配下に**正規化(path.resolve)した上で prefix チェック**し、`..` によるパストラバーサルおよびサーバー間の越境アクセスを遮断。
@@ -251,6 +262,9 @@ services:
       DOCKER_PROXY_HOST: docker-socket-proxy
       DOCKER_PROXY_PORT: 2375
       PORT: 3000
+      SHARED_ROOT: /mnt/docker-root
+    volumes:
+      - /home/maki/docker:/mnt/docker-root   # 親ディレクトリを丸ごとマウント（3.3章）
 
   caddy:
     build:
@@ -263,7 +277,7 @@ volumes:
   pgdata:
 ```
 
-`docker-socket-proxy` を挟むのが最大のポイント。app-backendに直接 `docker.sock` を渡すとコンテナ内から実質ホストroot権限が取れてしまうため、認証なしでアクセスできるアプリでは特に避けたい。`/home/maki/docker` の共有マウントはPhase 4（ファイル管理）で追加する。
+`docker-socket-proxy` を挟むのが最大のポイント。app-backendに直接 `docker.sock` を渡すとコンテナ内から実質ホストroot権限が取れてしまうため、認証なしでアクセスできるアプリでは特に避けたい。
 
 ---
 
@@ -272,8 +286,8 @@ volumes:
 1. **Phase 1（完了）**: PostgreSQLスキーマ + ダッシュボード（ホストCPU/メモリ表示）。認証は要件変更により実装せず。
 2. **Phase 2（完了）**: docker-socket-proxy導入 + サーバー自動検出（`mcmonitor.enable`/`mcmonitor.data_path` labelをdockerode経由でスキャンし`servers`テーブルにupsert）+ サーバー切替UI（ダッシュボードのヘッダーに実装。既存`../minecraft`にlabelを付与し実際に自動検出されることを確認済み）
 3. **Phase 3（完了）**: Minecraft start/stop/restart。`POST /api/servers/:id/{start,stop,restart}` + フロントの操作ボタン（確認ダイアログ付き）を実装し、実機の重量級Forgeサーバーで動作確認済み（7章に権限まわりの注意点と運用上の注意を記載）。
-4. **Phase 4（次）**: ファイル管理（一覧・DL・アップロード。まずは閲覧系から）
-5. **Phase 5**: rename/move/delete（破壊的操作、ゴミ箱運用込み）
+4. **Phase 4（完了）**: ファイル管理（一覧・DL・アップロード）。フロントはタブUI（ダッシュボード/ファイル）に再構成し、`App.tsx`でサーバー切替・操作ボタンを共通ヘッダー化。実機の`minecraft`コンテナに対し一覧・ダウンロード・アップロードとパストラバーサル対策を確認済み。
+5. **Phase 5（次）**: rename/move/delete（破壊的操作、ゴミ箱運用込み）
 6. **Phase 6**: RCON連携（プレイヤー一覧・TPSなど任意機能）
 7. **Phase 7**: 2台目のMinecraftサーバーを実際に追加し、追加コード変更なしで検出・管理できるか検証
 

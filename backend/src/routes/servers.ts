@@ -1,17 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../db/client.js";
-import { servers } from "../db/schema.js";
+import { getServerById } from "../services/serverLookup.js";
 import { discoverAndSyncServers } from "../services/serverDiscovery.js";
 import { startContainer, stopContainer, restartContainer } from "../services/dockerControl.js";
 
 const paramsSchema = z.object({ id: z.coerce.number().int().positive() });
-
-async function resolveContainerName(id: number): Promise<string | null> {
-  const rows = await db.select().from(servers).where(eq(servers.id, id)).limit(1);
-  return rows[0]?.containerName ?? null;
-}
 
 function controlHandler(action: (containerName: string) => Promise<void>) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
@@ -20,10 +13,11 @@ function controlHandler(action: (containerName: string) => Promise<void>) {
       return reply.code(400).send({ error: "invalid_id" });
     }
 
-    const containerName = await resolveContainerName(parsed.data.id);
-    if (!containerName) {
+    const server = await getServerById(parsed.data.id);
+    if (!server) {
       return reply.code(404).send({ error: "server_not_found" });
     }
+    const containerName = server.containerName;
 
     try {
       await action(containerName);
