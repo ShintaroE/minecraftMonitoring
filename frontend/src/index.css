@@ -123,6 +123,20 @@ h1 {
   font-size: 14px;
 }
 
+.server-switcher {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--text-h);
+  font-size: 14px;
+}
+
+.server-switcher-empty {
+  font-size: 14px;
+  opacity: 0.75;
+}
+
 .stat-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

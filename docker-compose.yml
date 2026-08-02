@@ -14,6 +14,16 @@ services:
       timeout: 5s
       retries: 10
 
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      # Phase 2時点では一覧/inspectのみ許可（読み取り専用）。
+      # Phase 3でstart/stop/restartを実装する際にSTART/STOP/RESTART/POSTを追加する。
+      CONTAINERS: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
   app-backend:
     build:
       context: ./backend
@@ -21,8 +31,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
     environment:
       DATABASE_URL: postgres://app:${POSTGRES_PASSWORD}@postgres:5432/mcmonitor
+      DOCKER_PROXY_HOST: docker-socket-proxy
+      DOCKER_PROXY_PORT: 2375
       PORT: 3000
 
   caddy:

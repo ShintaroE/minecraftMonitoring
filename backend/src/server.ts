@@ -2,11 +2,13 @@ import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import { env } from "./env.js";
 import { metricsRoutes } from "./routes/metrics.js";
+import { serverRoutes } from "./routes/servers.js";
 
 const app = Fastify({ logger: true });
 
 await app.register(websocket);
 await app.register(metricsRoutes);
+await app.register(serverRoutes);
 
 app.get("/api/health", async () => ({ ok: true }));
 

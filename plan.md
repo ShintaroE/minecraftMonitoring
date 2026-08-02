@@ -3,7 +3,7 @@
 ## 0. 前提（ヒアリング結果）
 
 - 公開範囲: VPN経由のみ（インターネット直接公開なし）
-- 利用者: 複数人（友人など）→ ロールベースの権限管理が必要
+- 利用者: 複数人（友人など）。ただし **VPNで接続者が限定されているため、アプリ内でのログイン機能・ユーザー管理・監査ログは設けない**（実装時に決定。詳細は5章）
 - 技術スタック: おまかせ
 - デプロイ: 既存 `../minecraft` と同様に Docker Compose で管理
 - サーバー制御: RCONではなく **dockerコマンド優先**（既存 `minecraft` コンテナは itzg/minecraft-server イメージで、`docker stop`=SIGTERM時にentrypoint側でgraceful stop処理されるため、docker操作だけで十分安全に止められる）
@@ -11,7 +11,7 @@
 - DB: **PostgreSQL**
 - リバースプロキシ: **Caddy**（nginxでも技術的には代替可。VPN内単一アプリ+WebSocket用途ではCaddyの方が設定量が少ないため引き続き推奨）
 
-VPN内とはいえ複数人がアクセスし、かつ「ファイル削除」「サーバー停止」という**取り返しのつきにくい操作**を扱うため、認証・権限・監査ログは省略せずきちんと設計する。
+> **実装状況（随時更新）**: Phase 1（PostgreSQLスキーマ + ダッシュボード）・Phase 2（docker-socket-proxy + サーバー自動検出 + 切替UI）実装・動作確認済み。認証は要件から外れたため未実装（5章参照）。次はPhase 3（start/stop/restart）。
 
 ---
 
@@ -19,10 +19,10 @@ VPN内とはいえ複数人がアクセスし、かつ「ファイル削除」�
 
 ```
                          [ VPN内クライアント ]
-                                 │ HTTPS
+                                 │ HTTP（VPN内限定のためTLS終端は必須ではない）
                                  ▼
                      ┌─────────────────────┐
-                     │  Caddy (reverse proxy) │  ← TLS終端 / 静的配信 / WS proxy
+                     │  Caddy (reverse proxy) │  ← 静的配信 / WS proxy
                      └─────────────────────┘
                                  │
                                  ▼
@@ -31,7 +31,6 @@ VPN内とはいえ複数人がアクセスし、かつ「ファイル削除」�
                      │  Fastify + TypeScript │
                      │  - REST API            │
                      │  - WebSocket (metrics) │
-                     │  - Auth / RBAC         │
                      │  - サーバーレジストリ    │
                      └───┬───────┬───────┬───┘
                           │       │       │
@@ -39,10 +38,10 @@ VPN内とはいえ複数人がアクセスし、かつ「ファイル削除」�
               ▼                   ▼                   ▼
 ┌───────────────────────┐  ┌────────────┐   ┌──────────────────────────┐
 │ docker-socket-proxy    │  │ PostgreSQL │   │ RCON（任意・server毎）      │
-│ (list/start/stop/      │  │ users      │   │ - list/save-all/TPSなど   │
-│  restart/stats のみ許可) │  │ servers    │   │ 　（停止は docker で行う）  │
-└──────────┬─────────────┘  │ audit_log  │   └──────────────────────────┘
-           ▼                 └────────────┘
+│ (list/start/stop/      │  │ servers    │   │ - list/save-all/TPSなど   │
+│  restart/stats のみ許可) │  └────────────┘   │ 　（停止は docker で行う）  │
+└──────────┬─────────────┘                   └──────────────────────────┘
+           ▼                 [Phase 2以降で導入]
    /var/run/docker.sock (host)
            │
    ┌───────┼─────────────────┐
@@ -50,12 +49,13 @@ VPN内とはいえ複数人がアクセスし、かつ「ファイル削除」�
  minecraft  minecraft2  ...  minecraftN   ← 各サーバーは独立したdocker-composeスタック
  (既存)     (将来追加)         (将来追加)     label: mcmonitor.enable=true で自動検出
 
-   app-backend からのマウント:
+   app-backend からのマウント（Phase 2以降）:
    - /home/maki/docker  (rw, 親ディレクトリを丸ごとマウント → 新サーバー追加時にmount追記不要)
-   - /proc, /sys (ro)   (ホストCPU/メモリ取得用)
 ```
 
-フロントエンドは静的ビルドして Caddy or app-backend から配信（SPA）。
+フロントエンドは静的ビルドしてCaddyコンテナに焼き込み配信（別途「frontend」コンテナは立てない）。
+
+ホストCPU/メモリの取得について: Dockerコンテナは特別なマウントなしでも `/proc/meminfo` 等がホスト全体の値を返すことを実機確認済み（cgroup制限を掛けてもホスト値が見える）。そのため当初想定していた `/proc`,`/sys` の追加bind mountは不要と判明し、実装では省略した。
 
 ---
 
@@ -63,18 +63,18 @@ VPN内とはいえ複数人がアクセスし、かつ「ファイル削除」�
 
 | コンポーネント | 技術 | 役割 |
 |---|---|---|
-| フロントエンド | React + TypeScript + Vite、UIは shadcn/ui または Mantine | ファイラーUI、操作パネル、監視ダッシュボード、サーバー切替UI |
-| バックエンド | Node.js + TypeScript + Fastify | REST API、WebSocket配信、認証、Docker/RCON制御、サーバーレジストリ管理 |
-| DB | **PostgreSQL** | ユーザー・ロール・監査ログ・サーバーメタデータ |
-| リバースプロキシ | Caddy（nginx代替可） | TLS終端、gzip、WebSocket proxy |
-| Docker制御 | docker-socket-proxy (tecnativa/docker-socket-proxy) | app-backend に直接 docker.sock を渡さず、許可するAPI（list/start/stop/restart/stats/logs）だけを中継。対象コンテナはラベルで絞り込み可能 |
-| Minecraft制御(主) | Docker (dockerode 経由 docker-socket-proxy) | start/stop/restart。itzgイメージはSIGTERMでgraceful stopするためこれが主手段 |
+| フロントエンド | React + TypeScript + Vite | 監視ダッシュボード、（Phase以降）ファイラーUI・操作パネル・サーバー切替UI |
+| バックエンド | Node.js + TypeScript + Fastify | REST API、WebSocket配信、Docker/RCON制御、サーバーレジストリ管理 |
+| DB | **PostgreSQL**（Drizzle ORM） | サーバーメタデータ（`servers`テーブル） |
+| リバースプロキシ | Caddy（nginx代替可） | 静的配信、WebSocket proxy |
+| Docker制御（Phase2以降） | docker-socket-proxy (tecnativa/docker-socket-proxy) | app-backend に直接 docker.sock を渡さず、許可するAPI（list/start/stop/restart/stats/logs）だけを中継 |
+| Minecraft制御(主・Phase3以降) | Docker (dockerode 経由 docker-socket-proxy) | start/stop/restart。itzgイメージはSIGTERMでgraceful stopするためこれが主手段 |
 | Minecraft制御(副・任意) | RCON (rcon-client npm、サーバー毎に接続先を切替) | プレイヤー一覧、TPS、chat broadcast、手動save-allなど「あると便利」機能用 |
-| ホストメトリクス | systeminformation (npm) | CPU使用率、メモリ使用率、ディスク使用量を取得しWSで配信 |
+| ホストメトリクス | systeminformation (npm) | CPU使用率、メモリ使用率を取得しWSで配信（実装済み） |
 
 ---
 
-## 3. マルチサーバー管理設計（今回の要望の核）
+## 3. マルチサーバー管理設計（次フェーズの中心）
 
 将来Minecraftサーバーを増やしても、**このアプリのコード/インフラ設定を変更せずに追加・切替できる**ことを目標にする。
 
@@ -89,9 +89,10 @@ VPN内とはいえ複数人がアクセスし、かつ「ファイル削除」�
   ```
 - app-backend は起動時 & 定期的に docker-socket-proxy 経由で `mcmonitor.enable=true` ラベルを持つコンテナを一覧取得し、**サーバー一覧を自動生成**する。
 - 新しいMinecraftサーバーを `../minecraft2/docker-compose.yml` として建てて起動するだけで、アプリ側は再デプロイ・再設定なしに一覧へ反映される。
+- 既存の `../minecraft/docker-compose.yml` には Phase 2実装時にこのラベルを追加し、`docker compose up -d`で反映済み（コンテナの再作成を伴うため実施可否をユーザーに確認の上で実施）。実際に `mcmonitor.enable=true` で自動検出され、`/api/servers`経由で取得できることを確認済み。
 
 ### 3.2 PostgreSQL側で持つ付加メタデータ
-自動検出できない情報（表示名・並び順・RCONパスワード・説明文・無効化フラグなど）は `servers` テーブルで管理し、コンテナ名（またはlabelで持たせた`server_id`）をキーに突き合わせる。
+自動検出できない情報（表示名・並び順・RCON接続情報・無効化フラグなど）は `servers` テーブルで管理し、コンテナ名をキーに突き合わせる。
 
 ```
 servers
@@ -104,6 +105,8 @@ servers
   is_archived
 ```
 
+（実装済み。ただし現状は空テーブルで、自動検出ロジックは未実装＝Phase 2の作業）
+
 ### 3.3 ファイル管理の共有ルート化
 - 個別サーバーごとに bind mount を都度追加すると compose 変更・再起動が必要になるため、**app-backendには `/home/maki/docker` を1つだけマウント**し、その配下のどのサブフォルダ（`minecraft/data`, `minecraft2/data`, ...）を触るかは `servers.data_path` で制御する。
 - ファイルAPIは常に「選択中サーバーの `data_path` 配下」にpathを正規化・prefixチェックする（サーバーをまたいだ越境アクセスを防止）。
@@ -114,59 +117,59 @@ servers
 
 ---
 
-## 4. ディレクトリ構成案
+## 4. ディレクトリ構成（現状）
 
 ```
 minecraftMonitoring/
 ├── docker-compose.yml
+├── .env.example                 # POSTGRES_PASSWORD のみ
 ├── caddy/
 │   └── Caddyfile
 ├── backend/
 │   ├── src/
 │   │   ├── routes/
-│   │   │   ├── servers.ts      # サーバー一覧/登録/メタデータ
-│   │   │   ├── files.ts        # 一覧/アップロード/DL/rename/move/delete（server_idスコープ）
-│   │   │   ├── control.ts      # start/stop/restart/status（server_idスコープ）
-│   │   │   ├── metrics.ts      # WS: CPU/Mem/各サーバー状態
-│   │   │   └── auth.ts         # login/logout/session
+│   │   │   ├── metrics.ts       # WS: ホストCPU/Mem配信
+│   │   │   └── servers.ts       # GET /api/servers（自動検出+DB同期）
+│   │   │       ↳ 今後追加: files.ts / control.ts
 │   │   ├── services/
-│   │   │   ├── dockerControl.ts
-│   │   │   ├── serverDiscovery.ts  # label検出 + DBメタデータのマージ
-│   │   │   ├── rcon.ts
-│   │   │   ├── fsSafe.ts           # パストラバーサル対策込みFS操作
-│   │   │   └── metricsCollector.ts
-│   │   ├── middleware/
-│   │   │   ├── requireAuth.ts
-│   │   │   └── requireRole.ts
+│   │   │   ├── metricsCollector.ts
+│   │   │   ├── dockerClient.ts     # dockerode（docker-socket-proxy経由）
+│   │   │   └── serverDiscovery.ts  # label検出 + servers upsert
+│   │   │       ↳ 今後追加: dockerControl.ts（start/stop/restart） / rcon.ts / fsSafe.ts
 │   │   ├── db/
-│   │   │   ├── schema.ts       # users, sessions, servers, audit_log
+│   │   │   ├── schema.ts       # servers のみ
 │   │   │   └── migrations/
+│   │   ├── env.ts
 │   │   └── server.ts
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/ (Dashboard, Files, ServerControl, Servers, Login, Users)
-│   │   └── components/
+│   │   ├── pages/
+│   │   │   └── Dashboard.tsx
+│   │   ├── components/
+│   │   │   └── ServerSwitcher.tsx
+│   │   ├── api/servers.ts
+│   │   └── hooks/ (useMetricsSocket.ts, useServers.ts)
 │   └── package.json
-└── (DBデータは postgres コンテナの named volume で永続化)
+└── (DBデータは postgres コンテナの named volume `pgdata` で永続化)
 ```
 
 ---
 
-## 5. 認証・権限設計
+## 5. 認証・権限について（変更あり）
 
-- セッションベース認証（httpOnly + Secure + SameSite=Strict cookie）。VPN内限定でもクッキー窃取対策として必須。
-- パスワードは argon2 でハッシュ化。
-- 状態変更系エンドポイント（POST/PUT/DELETE）には CSRF トークン（double-submit cookie）を必須化。
-- ロールは2種類で開始:
-  - **admin**: ファイル全操作（アップロード/DL/rename/削除）、サーバー start/stop/restart、サーバー登録・編集、ユーザー管理
-  - **member**: サーバー状態閲覧、restart のみ可、ファイルは閲覧・ダウンロードのみ（削除/アップロード不可）
-- 初期ユーザーは環境変数 or 初回セットアップ画面で作成。招待制（自己登録なし）。
-- 監査ログ（`audit_log` テーブル）: 誰が・いつ・どのサーバーに対し・何を（delete/rename/upload/stop/restart/サーバー登録変更）実行したかを記録し、管理画面で閲覧可能に。複数人利用のため必須。
+**当初案（セッション認証 + admin/memberロール + 監査ログ）は実装せず、削除した。**
+
+- **理由**: VPNで接続者自体が既に限定されているため、アプリ内に追加のログイン層を設ける必要がないと判断（ユーザー判断）。
+- **影響**:
+  - ログイン画面なし。VPNに繋がっていれば誰でもダッシュボード・今後実装するファイル操作/サーバー制御にフルアクセス可能。
+  - `users` / `sessions` / `audit_log` テーブルは削除済み。「誰が操作したか」は記録されない。
+  - Phase 4以降のファイル削除やPhase 3のサーバー停止操作も、確認ダイアログ（フロント側のUXとして）はあっても、個人の特定・操作履歴の追跡はできない前提で設計する。
+- 将来的に外部公開や利用者拡大などでこの前提が崩れる場合は、この章を再設計すること。
 
 ---
 
-## 6. ファイル管理機能
+## 6. ファイル管理機能（Phase 4以降で実装予定）
 
 ### API例（すべて `server_id` でスコープ）
 | メソッド | パス | 説明 |
@@ -177,99 +180,96 @@ minecraftMonitoring/
 | POST | `/api/servers/:id/files/upload?path=` | アップロード（multipart, ストリーム保存） |
 | POST | `/api/servers/:id/files/rename` | `{from, to}` |
 | POST | `/api/servers/:id/files/move` | `{from, to}` |
-| DELETE | `/api/servers/:id/files?path=` | 削除（確認ダイアログ必須・監査ログ必須） |
+| DELETE | `/api/servers/:id/files?path=` | 削除（フロントで確認ダイアログ必須） |
 
 ### セキュリティ設計（最重要）
 - 操作対象パスは常に「共有ルート(`/home/maki/docker`) + 対象サーバーの `data_path`」配下に**正規化(path.resolve)した上で prefix チェック**し、`..` によるパストラバーサルおよびサーバー間の越境アクセスを遮断。
 - シンボリックリンクは辿らない（`fs.realpath` で検証、外部を指すリンクは拒否）。
 - アップロードはサイズ上限・拡張子/内容チェック。
 - `world/` 等の稼働中データへの書き込み系操作は、対象サーバー稼働中は警告 or 制限（ワールド破損防止のため、書き込みはサーバー停止中のみ許可、という運用ルールを検討）。
-- 削除は即時ではなく、まずゴミ箱的な一時退避（`.trash/` へmove）→ 一定期間後に物理削除、のワンクッション運用を推奨（誤削除対策）。
+- 削除は即時ではなく、まずゴミ箱的な一時退避（`.trash/` へmove）→ 一定期間後に物理削除、のワンクッション運用を推奨（誤削除対策。認証がない分、この安全弁は特に重要）。
 
 ---
 
-## 7. Minecraftサーバー制御
+## 7. Minecraftサーバー制御（Phase 3で実装予定）
 
 - **停止**: docker-socket-proxy 経由で対象コンテナに `docker stop`（SIGTERM）。itzgイメージのentrypointがgraceful stop（save-all等）を内部処理するため、これが主手段。
 - **起動**: docker-socket-proxy 経由で `docker start`。
 - **再起動**: `docker restart`、または停止→起動を内部で連結。
 - **状態取得**: コンテナのHealth/Running状態（docker API）。RCONが設定されているサーバーは追加でオンラインプレイヤー数・TPSなども取得。
-- 実行前に確認ダイアログ + 監査ログ記録（誰が・どのサーバーを停止/再起動したか）。
+- 実行前にフロントで確認ダイアログを必須にする（誰でも押せるため誤操作防止が唯一の歯止め）。
 - RCONは必須要件から外し、**設定されていれば追加情報が見える任意機能**として位置づける（サーバーごとにRCON未設定でも起動/停止/再起動は問題なく行える）。
 
 ---
 
-## 8. CPU / メモリ可視化
+## 8. CPU / メモリ可視化（実装済み）
 
-- `app-backend` コンテナに **ホストの `/proc`, `/sys` を read-only でマウント**し、`systeminformation` ライブラリでホスト全体のCPU/メモリ/ディスク使用率を取得（コンテナ自身のcgroup値ではなくPC全体の値を見るため）。
-- 数秒間隔でポーリングし、WebSocketでフロントにpush → フロントは直近の時系列を折れ線グラフ表示（Recharts等）。
-- 合わせて各Minecraftコンテナ単体のCPU/メモリ（`docker stats` 相当、socket-proxy経由）も取得し、サーバーごとの負荷比較ができるようにする（複数サーバー運用時に特に有用）。
-- ダッシュボードに載せると良い情報: ホストCPU%、ホストメモリ%、ディスク空き容量、サーバー別の稼働状態・CPU/メモリ・オンラインプレイヤー数。
+- `systeminformation` ライブラリでホスト全体のCPU/メモリ使用率を取得（特別なマウント不要、1章参照）。
+- 2秒間隔でポーリングし、WebSocket(`/ws/metrics`)でフロントにpush → フロントは直近60ポイントを折れ線グラフ表示（Recharts）。
+- 今後（Phase 2以降）: 各Minecraftコンテナ単体のCPU/メモリ（`docker stats` 相当、socket-proxy経由）も取得し、サーバーごとの負荷比較ができるようにする。
 
 ---
 
-## 9. docker-compose.yml 構成イメージ（サービス一覧のみ、コード実装はしない）
+## 9. docker-compose.yml（現状）
 
 ```yaml
 services:
-  caddy:
-    # 80/443 を公開、app-backend へリバースプロキシ
-
-  app-backend:
-    build: ./backend
-    volumes:
-      - /home/maki/docker:/mnt/docker-root         # 共有ルート（新サーバー追加時にmount追記不要）
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-    environment:
-      - DOCKER_HOST=tcp://docker-socket-proxy:2375
-      - DATABASE_URL=postgres://app:xxxx@postgres:5432/mcmonitor
-
   postgres:
     image: postgres:16
     environment:
       POSTGRES_DB: mcmonitor
       POSTGRES_USER: app
-      POSTGRES_PASSWORD: xxxx
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
 
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy
+    image: tecnativa/docker-socket-proxy:latest   # ※ :0.4 タグは存在しないので latest を使用
     environment:
-      CONTAINERS: 1
-      START: 1
-      STOP: 1
-      RESTART: 1
-      POST: 1     # start/stop/restartに必要な範囲のみ
+      CONTAINERS: 1   # 現状はlist/inspectのみ許可。Phase3でSTART/STOP/RESTART/POSTを追加予定
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  app-backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgres://app:${POSTGRES_PASSWORD}@postgres:5432/mcmonitor
+      DOCKER_PROXY_HOST: docker-socket-proxy
+      DOCKER_PROXY_PORT: 2375
+      PORT: 3000
+
+  caddy:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile   # フロントエンドのビルド＋配信を兼ねる
+    ports:
+      - "80:80"
 
 volumes:
   pgdata:
 ```
 
-`docker-socket-proxy` を挟むのが最大のポイント。app-backendに直接 `docker.sock` を渡すとコンテナ内から実質ホストroot権限が取れてしまうため、複数人がアクセスするアプリでは特に避けたい。
-
-`/home/maki/docker` を丸ごとマウントする設計は利便性（新サーバー追加が自動反映）とのトレードオフとして、アプリ側の相対パス検証（6章）を厳格に実装することが前提になる。ここが崩れると全サーバー横断でアクセスできてしまうため、実装フェーズでのセキュリティレビューを重視すること。
+`docker-socket-proxy` を挟むのが最大のポイント。app-backendに直接 `docker.sock` を渡すとコンテナ内から実質ホストroot権限が取れてしまうため、認証なしでアクセスできるアプリでは特に避けたい。`/home/maki/docker` の共有マウントはPhase 4（ファイル管理）で追加する。
 
 ---
 
-## 10. 実装フェーズ案（段階的に進める場合）
+## 10. 実装フェーズと進捗
 
-1. **Phase 1**: 認証基盤 + PostgreSQLスキーマ + ダッシュボード（ホストCPU/メモリ表示のみ）
-2. **Phase 2**: サーバー自動検出（label検出）+ サーバー切替UI（1台構成でも土台を先に作る）
-3. **Phase 3**: Minecraft start/stop/restart（docker-socket-proxy経由）
+1. **Phase 1（完了）**: PostgreSQLスキーマ + ダッシュボード（ホストCPU/メモリ表示）。認証は要件変更により実装せず。
+2. **Phase 2（完了）**: docker-socket-proxy導入 + サーバー自動検出（`mcmonitor.enable`/`mcmonitor.data_path` labelをdockerode経由でスキャンし`servers`テーブルにupsert）+ サーバー切替UI（ダッシュボードのヘッダーに実装。既存`../minecraft`にlabelを付与し実際に自動検出されることを確認済み）
+3. **Phase 3（次）**: Minecraft start/stop/restart（docker-socket-proxy経由。`CONTAINERS`に加えて`START`/`STOP`/`RESTART`/`POST`環境変数を追加する必要あり）
 4. **Phase 4**: ファイル管理（一覧・DL・アップロード。まずは閲覧系から）
 5. **Phase 5**: rename/move/delete（破壊的操作、ゴミ箱運用込み）
-6. **Phase 6**: RCON連携（プレイヤー一覧・TPSなど任意機能）、監査ログ画面、ユーザー管理画面
+6. **Phase 6**: RCON連携（プレイヤー一覧・TPSなど任意機能）
 7. **Phase 7**: 2台目のMinecraftサーバーを実際に追加し、追加コード変更なしで検出・管理できるか検証
+
+（旧Phase 6にあった「監査ログ画面」「ユーザー管理画面」は認証を実装しない方針のため削除）
 
 ---
 
 ## 11. 今後の検討事項
 
-- TLS証明書: VPN内なので自己署名 or Caddyの内部CAで十分。将来的な外部公開時はLet's Encrypt検討。
+- TLS証明書: VPN内なので現状は平文HTTPのまま運用。将来的な外部公開時はHTTPS化必須（そのタイミングで5章の認証も再検討）。
 - バックアップ: worldフォルダの定期バックアップ（cron + tar）は本アプリのスコープ外だが、ダッシュボード上に「最終バックアップ日時」を表示する連携は有用。
 - 通知: サーバーダウン検知やCPU高負荷アラートをDiscord Webhookに飛ばす拡張。
 - テキストファイル編集: `server.properties` や `config/*` の中身をブラウザ上で直接編集できるエディタ機能はファイル管理の自然な拡張（要望あれば追加設計）。

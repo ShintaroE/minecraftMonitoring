@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -8,6 +9,8 @@ import {
   YAxis,
 } from "recharts";
 import { useMetricsSocket } from "../hooks/useMetricsSocket";
+import { useServers } from "../hooks/useServers";
+import { ServerSwitcher } from "../components/ServerSwitcher";
 
 function formatBytes(bytes: number): string {
   const gb = bytes / 1024 ** 3;
@@ -24,12 +27,26 @@ function formatTime(timestamp: number): string {
 
 export function Dashboard() {
   const { points, connected } = useMetricsSocket();
+  const { servers, loading: serversLoading } = useServers();
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const latest = points.at(-1);
+
+  useEffect(() => {
+    if (selectedId === null && servers.length > 0) {
+      setSelectedId(servers[0].id);
+    }
+  }, [servers, selectedId]);
 
   return (
     <div className="dashboard">
       <header className="dashboard-header">
         <h1>minecraftMonitoring</h1>
+        <ServerSwitcher
+          servers={servers}
+          loading={serversLoading}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+        />
       </header>
 
       <section className="stat-cards">
