@@ -20,10 +20,13 @@ function App() {
   }, [servers, selectedId]);
 
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <div className="dashboard-header-left">
-          <h1>minecraftMonitoring</h1>
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="app-header-left">
+          <div className="brand">
+            <span className="brand-mark">⛏</span>
+            <h1>minecraftMonitoring</h1>
+          </div>
           <nav className="tabs">
             <button className={tab === "dashboard" ? "active" : ""} onClick={() => setTab("dashboard")}>
               ダッシュボード
@@ -33,7 +36,7 @@ function App() {
             </button>
           </nav>
         </div>
-        <div className="dashboard-header-controls">
+        <div className="app-header-controls">
           <ServerSwitcher
             servers={servers}
             loading={serversLoading}

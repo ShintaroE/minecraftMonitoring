@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { controlServer, type Server, type ServerAction } from "../api/servers";
+import { PlayIcon, RestartIcon, StopIcon } from "./icons";
 
 interface Props {
   server: Server | null;
@@ -36,13 +37,28 @@ export function ServerControls({ server, onChanged }: Props) {
 
   return (
     <div className="server-controls">
-      <button disabled={isRunning || pending !== null} onClick={() => run("start")}>
+      <button
+        className="btn btn-sm btn-success"
+        disabled={isRunning || pending !== null}
+        onClick={() => run("start")}
+      >
+        <PlayIcon />
         {pending === "start" ? "起動中..." : "起動"}
       </button>
-      <button disabled={!isRunning || pending !== null} onClick={() => run("stop")}>
+      <button
+        className="btn btn-sm btn-danger"
+        disabled={!isRunning || pending !== null}
+        onClick={() => run("stop")}
+      >
+        <StopIcon />
         {pending === "stop" ? "停止中..." : "停止"}
       </button>
-      <button disabled={!isRunning || pending !== null} onClick={() => run("restart")}>
+      <button
+        className="btn btn-sm btn-outline"
+        disabled={!isRunning || pending !== null}
+        onClick={() => run("restart")}
+      >
+        <RestartIcon />
         {pending === "restart" ? "再起動中..." : "再起動"}
       </button>
     </div>

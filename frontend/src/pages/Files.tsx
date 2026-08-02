@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Server } from "../api/servers";
 import { deleteFile, downloadUrl, downloadZipUrl, fetchFiles, renameFile, uploadFile, type FileEntry } from "../api/files";
 import { formatBytes, formatDateTime } from "../lib/format";
+import { ArchiveIcon, ChevronRightIcon, EditIcon, FileIcon, FolderIcon, MoveIcon, TrashIcon, UploadIcon } from "../components/icons";
 
 interface Props {
   server: Server | null;
@@ -125,8 +126,10 @@ export function Files({ server }: Props) {
         <nav className="breadcrumb">
           <button onClick={() => setCurrentPath("")}>{server.displayName}</button>
           {breadcrumbSegments.map((segment, i) => (
-            <span key={i}>
-              {" / "}
+            <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span className="breadcrumb-sep">
+                <ChevronRightIcon width={13} height={13} />
+              </span>
               <button onClick={() => setCurrentPath(breadcrumbSegments.slice(0, i + 1).join("/"))}>
                 {segment}
               </button>
@@ -134,10 +137,12 @@ export function Files({ server }: Props) {
           ))}
         </nav>
         <div className="files-toolbar-actions">
-          <a className="upload-button" href={downloadZipUrl(server.id, currentPath)}>
+          <a className="btn btn-sm btn-outline" href={downloadZipUrl(server.id, currentPath)}>
+            <ArchiveIcon />
             このフォルダをZIPでDL
           </a>
-          <label className="upload-button">
+          <label className="btn btn-sm btn-primary upload-button">
+            <UploadIcon />
             {uploading ? "アップロード中..." : "アップロード"}
             <input
               ref={fileInputRef}
@@ -152,70 +157,95 @@ export function Files({ server }: Props) {
 
       {error && <p className="error">{error}</p>}
 
-      <table className="file-table">
-        <thead>
-          <tr>
-            <th>名前</th>
-            <th>サイズ</th>
-            <th>更新日時</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {loading && (
+      <div className="file-table-wrap">
+        <table className="file-table">
+          <thead>
             <tr>
-              <td colSpan={4}>読み込み中...</td>
+              <th>名前</th>
+              <th>サイズ</th>
+              <th>更新日時</th>
+              <th></th>
             </tr>
-          )}
-          {!loading && entries.length === 0 && (
-            <tr>
-              <td colSpan={4}>ファイルがありません。</td>
-            </tr>
-          )}
-          {!loading &&
-            entries.map((entry) => (
-              <tr key={entry.name}>
-                <td>
-                  {entry.type === "directory" ? (
-                    <button
-                      className="file-link"
-                      onClick={() => setCurrentPath(joinPath(currentPath, entry.name))}
-                    >
-                      📁 {entry.name}
-                    </button>
-                  ) : (
-                    <a
-                      className="file-link"
-                      href={downloadUrl(server.id, joinPath(currentPath, entry.name))}
-                    >
-                      📄 {entry.name}
-                    </a>
-                  )}
-                </td>
-                <td>{entry.type === "file" ? formatBytes(entry.size) : "-"}</td>
-                <td>{formatDateTime(entry.mtime)}</td>
-                <td className="file-row-actions">
-                  {entry.type === "directory" && (
-                    <a
-                      href={downloadZipUrl(server.id, joinPath(currentPath, entry.name))}
-                    >
-                      ZIP DL
-                    </a>
-                  )}
-                  <button disabled={busyName !== null} onClick={() => handleRename(entry)}>
-                    名前変更
-                  </button>
-                  <button disabled={busyName !== null} onClick={() => handleMove(entry)}>
-                    移動
-                  </button>
-                  <button disabled={busyName !== null} onClick={() => handleDelete(entry)}>
-                    削除
-                  </button>
-                </td>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr>
+                <td colSpan={4}>読み込み中...</td>
               </tr>
-            ))}
-        </tbody>
-      </table>
+            )}
+            {!loading && entries.length === 0 && (
+              <tr>
+                <td colSpan={4}>ファイルがありません。</td>
+              </tr>
+            )}
+            {!loading &&
+              entries.map((entry) => (
+                <tr key={entry.name}>
+                  <td>
+                    {entry.type === "directory" ? (
+                      <button
+                        className="file-link"
+                        onClick={() => setCurrentPath(joinPath(currentPath, entry.name))}
+                      >
+                        <FolderIcon className="file-icon is-folder" />
+                        {entry.name}
+                      </button>
+                    ) : (
+                      <a
+                        className="file-link"
+                        href={downloadUrl(server.id, joinPath(currentPath, entry.name))}
+                      >
+                        <FileIcon className="file-icon" />
+                        {entry.name}
+                      </a>
+                    )}
+                  </td>
+                  <td className="col-size">{entry.type === "file" ? formatBytes(entry.size) : "-"}</td>
+                  <td className="col-mtime">{formatDateTime(entry.mtime)}</td>
+                  <td className="file-row-actions">
+                    {entry.type === "directory" && (
+                      <a
+                        className="btn btn-icon btn-ghost"
+                        title="ZIPでダウンロード"
+                        aria-label="ZIPでダウンロード"
+                        href={downloadZipUrl(server.id, joinPath(currentPath, entry.name))}
+                      >
+                        <ArchiveIcon />
+                      </a>
+                    )}
+                    <button
+                      className="btn btn-icon btn-ghost"
+                      title="名前変更"
+                      aria-label="名前変更"
+                      disabled={busyName !== null}
+                      onClick={() => handleRename(entry)}
+                    >
+                      <EditIcon />
+                    </button>
+                    <button
+                      className="btn btn-icon btn-ghost"
+                      title="移動"
+                      aria-label="移動"
+                      disabled={busyName !== null}
+                      onClick={() => handleMove(entry)}
+                    >
+                      <MoveIcon />
+                    </button>
+                    <button
+                      className="btn btn-icon btn-ghost danger-hover"
+                      title="削除"
+                      aria-label="削除"
+                      disabled={busyName !== null}
+                      onClick={() => handleDelete(entry)}
+                    >
+                      <TrashIcon />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
