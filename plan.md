@@ -11,7 +11,7 @@
 - DB: **PostgreSQL**
 - リバースプロキシ: **Caddy**（nginxでも技術的には代替可。VPN内単一アプリ+WebSocket用途ではCaddyの方が設定量が少ないため引き続き推奨）
 
-> **実装状況（随時更新）**: Phase 1〜5.1（ダッシュボード、サーバー自動検出+切替UI、start/stop/restart、ファイル一覧/DL/アップロード、rename/move/delete+ゴミ箱運用+フォルダZIP DL）実装・動作確認済み。認証は要件から外れたため未実装（5章参照）。次はPhase 6（RCON連携）。
+> **実装状況（随時更新）**: Phase 1〜6（ダッシュボード、サーバー自動検出+切替UI、start/stop/restart、ファイル一覧/DL/アップロード、rename/move/delete+ゴミ箱運用+フォルダZIP DL、RCON連携）実装・動作確認済み。認証は要件から外れたため未実装（5章参照）。次はPhase 7（2台目サーバー追加検証）。
 
 ---
 
@@ -37,19 +37,20 @@
               ┌───────────┘       │       └───────────┐
               ▼                   ▼                   ▼
 ┌───────────────────────┐  ┌────────────┐   ┌──────────────────────────┐
-│ docker-socket-proxy    │  │ PostgreSQL │   │ RCON（任意・server毎）      │
-│ (list/start/stop/      │  │ servers    │   │ - list/save-all/TPSなど   │
+│ docker-socket-proxy    │  │ PostgreSQL │   │ RCON（server毎、任意機能）  │
+│ (list/start/stop/      │  │ servers    │   │ - list（オンラインプレイヤー）│
 │  restart/stats のみ許可) │  └────────────┘   │ 　（停止は docker で行う）  │
-└──────────┬─────────────┘                   └──────────────────────────┘
-           ▼                 [Phase 2以降で導入]
-   /var/run/docker.sock (host)
-           │
-   ┌───────┼─────────────────┐
+└──────────┬─────────────┘                   └───────────┬──────────────┘
+           ▼                                              │ mcmonitor-net
+   /var/run/docker.sock (host)                            │ （external Dockerネットワーク、
+           │                                              │  RCONポートはホストに非公開）
+   ┌───────┼──────────────────────────────────────────────┘
    ▼       ▼                 ▼
  minecraft  minecraft2  ...  minecraftN   ← 各サーバーは独立したdocker-composeスタック
  (既存)     (将来追加)         (将来追加)     label: mcmonitor.enable=true で自動検出
+                                             ＋ mcmonitor-net に参加でRCON疎通
 
-   app-backend からのマウント（Phase 2以降）:
+   app-backend からのマウント:
    - /home/maki/docker  (rw, 親ディレクトリを丸ごとマウント → 新サーバー追加時にmount追記不要)
 ```
 
@@ -69,7 +70,7 @@
 | リバースプロキシ | Caddy（nginx代替可） | 静的配信、WebSocket proxy |
 | Docker制御（Phase2以降） | docker-socket-proxy (tecnativa/docker-socket-proxy) | app-backend に直接 docker.sock を渡さず、許可するAPI（list/start/stop/restart/stats/logs）だけを中継 |
 | Minecraft制御(主・Phase3以降) | Docker (dockerode 経由 docker-socket-proxy) | start/stop/restart。itzgイメージはSIGTERMでgraceful stopするためこれが主手段 |
-| Minecraft制御(副・任意) | RCON (rcon-client npm、サーバー毎に接続先を切替) | プレイヤー一覧、TPS、chat broadcast、手動save-allなど「あると便利」機能用 |
+| Minecraft制御(副・任意) | RCON (rcon-client npm) | オンラインプレイヤー一覧を取得しダッシュボードに表示（実装済み・Phase 6）。TPS/chat broadcast/手動save-allは未実装（今後の検討事項） |
 | ホストメトリクス | systeminformation (npm) | CPU使用率、メモリ使用率を取得しWSで配信（実装済み） |
 
 ---
@@ -137,8 +138,8 @@ minecraftMonitoring/
 │   │   │   ├── serverDiscovery.ts  # label検出 + servers upsert
 │   │   │   ├── dockerControl.ts    # start/stop/restart
 │   │   │   ├── serverLookup.ts     # id→serversレコード取得の共通ヘルパー
-│   │   │   └── fsSafe.ts           # パストラバーサル対策込みパス解決
-│   │   │       ↳ 今後追加: rcon.ts
+│   │   │   ├── fsSafe.ts           # パストラバーサル対策込みパス解決
+│   │   │   └── rcon.ts             # .rcon-cli.env読み取り + RCON接続 + list解析
 │   │   ├── db/
 │   │   │   ├── schema.ts       # servers のみ
 │   │   │   └── migrations/
@@ -153,9 +154,9 @@ minecraftMonitoring/
 │   │   ├── components/
 │   │   │   ├── ServerSwitcher.tsx
 │   │   │   └── ServerControls.tsx  # 起動/停止/再起動ボタン
-│   │   ├── api/ (servers.ts, files.ts)
+│   │   ├── api/ (servers.ts, files.ts, rcon.ts)
 │   │   ├── lib/format.ts           # formatBytes / formatDateTime
-│   │   ├── hooks/ (useMetricsSocket.ts, useServers.ts)
+│   │   ├── hooks/ (useMetricsSocket.ts, useServers.ts, useRconPlayers.ts)
 │   │   └── App.tsx                 # ヘッダー（サーバー切替+操作+タブ）を集約するレイアウト
 │   └── package.json
 └── (DBデータは postgres コンテナの named volume `pgdata` で永続化)
@@ -214,7 +215,7 @@ minecraftMonitoring/
 
 ---
 
-## 7. Minecraftサーバー制御（Phase 3で実装予定）
+## 7. Minecraftサーバー制御（Phase 3・6で実装済み）
 
 - **停止**: docker-socket-proxy 経由で対象コンテナに `docker stop`（SIGTERM）。itzgイメージのentrypointがgraceful stop（save-all等）を内部処理するため、これが主手段。
 - **起動**: docker-socket-proxy 経由で `docker start`。
@@ -229,6 +230,13 @@ minecraftMonitoring/
 - 実機（重量級Forgeサーバー、Mod多数）で動作確認済み。フル起動には約70秒かかる（modloadingが重いため）。稼働中の状態からの`stop`はexit code 0でワールドのgraceful saveを確認できたが、**起動途中（modloading中）に`stop`すると exit code 137（SIGKILL）になった**。これはDocker側のデフォルト停止猶予（10秒）内にJVM側のシャットダウンフックが間に合わなかったためと推測される。実運用上は「起動完了（ヘルスチェックがhealthyになるまで）は停止操作を避ける」運用注意が必要（フロント側での警告表示は未実装、今後の検討事項）。
 - **docker-socket-proxyの権限に関する重要な注意点**: `tecnativa/docker-socket-proxy:latest`のACLはHTTPメソッドを見ずパス文字列だけで判定するルールが多く、`CONTAINERS=1`と`POST=1`を両方有効にすると`/containers/*`配下の全操作（start/stop/restart/kill/pause/unpauseに加え、コンテナ削除やrenameなど）が技術的には通ってしまう。`ALLOW_START`/`ALLOW_STOP`/`ALLOW_RESTARTS`を個別に設定しても、`CONTAINERS=1`が有効な限りこの広い許可が優先されてしまうため、厳密な最小権限化はこのプロキシでは実現できない。対策として（ユーザー承認済み）: (1) docker-socket-proxyはポートを一切ホスト公開せずapp-backendからのみ到達可能にする、(2) app-backend自身のコードはstart/stop/restart以外のDocker API呼び出しを実装しない、の2点で実質的なリスクを抑える方針とした。より厳密に絞りたくなった場合は、socket-proxyを使わず「特定のdocker CLIコマンドだけを実行できるラップスクリプト+sudo」方式への切替を検討する。
 
+**RCON連携（実装済み・Phase 6）**
+- `GET /api/servers/:id/rcon/players` を実装。`rcon-client` npmで各Minecraftコンテナに直接RCON接続し、`list`コマンドでオンラインプレイヤー数・名前を取得。ダッシュボードに「オンラインプレイヤー」カードとして表示（15秒ポーリング）。
+- **接続経路**: app-backendとMinecraftコンテナは別々のdocker-composeプロジェクト（別ネットワーク）なので、あらかじめ`docker network create mcmonitor-net`で作成した外部（external）ネットワークに両方を参加させ、コンテナ名で直接疎通させている（ユーザー選定：RCONポートをホストに公開する案ではなく、ネットワーク越しに閉じる案を採用）。詳細は9章。
+- **RCONパスワードの取得元**: 環境変数や新規設定ファイルを追加せず、itzgイメージが各サーバーの`data_path`直下に自動生成する`.rcon-cli.env`（`password=...`形式）を共有マウント経由でそのまま読み取っている。サーバー側の追加設定は不要。
+- RCON未設定・コンテナ停止中・接続失敗など、あらゆる失敗ケースは例外を投げず`{ available: false }`を返す設計にし、フロントは「取得不可」と表示するのみ（エラー扱いしない＝任意機能としての位置づけを維持）。
+- TPS取得・chat broadcast・save-all等の追加コマンドは同じRCON接続を使い回せば実装できるが、今回は未実装（今後の検討事項）。
+
 ---
 
 ## 8. CPU / メモリ可視化（実装済み）
@@ -240,6 +248,12 @@ minecraftMonitoring/
 ---
 
 ## 9. docker-compose.yml（現状）
+
+**事前準備（初回のみ）**: RCON疎通用の外部ネットワークを手動で作成しておく必要がある。
+
+```bash
+docker network create mcmonitor-net
+```
 
 ```yaml
 services:
@@ -275,6 +289,9 @@ services:
       SHARED_ROOT: /mnt/docker-root
     volumes:
       - /home/maki/docker:/mnt/docker-root   # 親ディレクトリを丸ごとマウント（3.3章）
+    networks:
+      - default
+      - mcmonitor-net   # 各MinecraftコンテナへRCON接続するため
 
   caddy:
     build:
@@ -285,7 +302,14 @@ services:
 
 volumes:
   pgdata:
+
+networks:
+  default:
+  mcmonitor-net:
+    external: true   # `docker network create mcmonitor-net` で事前作成したネットワークを利用
 ```
+
+各Minecraftサーバー側の`docker-compose.yml`にも同様に`networks: [default, mcmonitor-net]`を追加する必要がある（`../minecraft/docker-compose.yml`は追加済み）。新しいサーバーを追加する際はこの一手間を忘れないこと。
 
 `docker-socket-proxy` を挟むのが最大のポイント。app-backendに直接 `docker.sock` を渡すとコンテナ内から実質ホストroot権限が取れてしまうため、認証なしでアクセスできるアプリでは特に避けたい。
 
@@ -299,8 +323,8 @@ volumes:
 4. **Phase 4（完了）**: ファイル管理（一覧・DL・アップロード）。フロントはタブUI（ダッシュボード/ファイル）に再構成し、`App.tsx`でサーバー切替・操作ボタンを共通ヘッダー化。実機の`minecraft`コンテナに対し一覧・ダウンロード・アップロードとパストラバーサル対策を確認済み。
 5. **Phase 5（完了）**: rename/delete（ゴミ箱運用込み）。実機で名前変更・削除・.trash退避・パストラバーサル/上書き防止を確認済み。副産物として、backendコンテナがrootで動いていたため`.trash`がroot所有になりホストユーザーが削除できない問題を発見・修正（`USER node`化）。
    - **Phase 5.1（完了・ユーザーフィードバック対応）**: `.trash`内ファイルが削除できないバグを修正、移動機能（フルパス指定）とフォルダZIPダウンロードを追加。
-6. **Phase 6（次）**: RCON連携（プレイヤー一覧・TPSなど任意機能）
-7. **Phase 7**: 2台目のMinecraftサーバーを実際に追加し、追加コード変更なしで検出・管理できるか検証
+6. **Phase 6（完了）**: RCON連携。外部Dockerネットワーク`mcmonitor-net`を作成してapp-backendと各Minecraftコンテナを参加させ、`.rcon-cli.env`のパスワードでRCON接続、`list`コマンドでオンラインプレイヤー数・名前を取得しダッシュボードに表示。実機で0人在線を確認済み（TPS等の追加コマンドは未実装）。
+7. **Phase 7（次）**: 2台目のMinecraftサーバーを実際に追加し、追加コード変更なしで検出・管理できるか検証（`mcmonitor-net`への参加も含めて手順化する）
 
 （旧Phase 6にあった「監査ログ画面」「ユーザー管理画面」は認証を実装しない方針のため削除）
 

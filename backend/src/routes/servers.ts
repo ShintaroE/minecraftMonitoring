@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getServerById } from "../services/serverLookup.js";
 import { discoverAndSyncServers } from "../services/serverDiscovery.js";
 import { startContainer, stopContainer, restartContainer } from "../services/dockerControl.js";
+import { fetchPlayerList } from "../services/rcon.js";
 
 const paramsSchema = z.object({ id: z.coerce.number().int().positive() });
 
@@ -41,4 +42,23 @@ export async function serverRoutes(app: FastifyInstance) {
   app.post("/api/servers/:id/start", controlHandler(startContainer));
   app.post("/api/servers/:id/stop", controlHandler(stopContainer));
   app.post("/api/servers/:id/restart", controlHandler(restartContainer));
+
+  app.get("/api/servers/:id/rcon/players", async (request, reply) => {
+    const parsed = paramsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_id" });
+    }
+
+    const server = await getServerById(parsed.data.id);
+    if (!server) {
+      return reply.code(404).send({ error: "server_not_found" });
+    }
+
+    const result = await fetchPlayerList(server.containerName, server.dataPath);
+    if (!result) {
+      return { available: false };
+    }
+
+    return { available: true, ...result };
+  });
 }

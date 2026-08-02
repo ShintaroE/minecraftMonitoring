@@ -149,6 +149,11 @@ h1 {
   color: var(--text-h);
 }
 
+.stat-sub {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
 .chart-container {
   padding: 16px;
   border: 1px solid var(--border);

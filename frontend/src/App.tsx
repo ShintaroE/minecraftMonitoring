@@ -44,7 +44,7 @@ function App() {
         </div>
       </header>
 
-      {tab === "dashboard" ? <Dashboard /> : <Files server={selectedServer} />}
+      {tab === "dashboard" ? <Dashboard server={selectedServer} /> : <Files server={selectedServer} />}
     </div>
   );
 }

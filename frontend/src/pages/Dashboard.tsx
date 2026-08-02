@@ -7,8 +7,14 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { Server } from "../api/servers";
 import { useMetricsSocket } from "../hooks/useMetricsSocket";
+import { useRconPlayers } from "../hooks/useRconPlayers";
 import { formatBytes } from "../lib/format";
+
+interface Props {
+  server: Server | null;
+}
 
 function formatTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString("ja-JP", {
@@ -18,8 +24,9 @@ function formatTime(timestamp: number): string {
   });
 }
 
-export function Dashboard() {
+export function Dashboard({ server }: Props) {
   const { points, connected } = useMetricsSocket();
+  const players = useRconPlayers(server?.id ?? null);
   const latest = points.at(-1);
 
   return (
@@ -46,6 +53,15 @@ export function Dashboard() {
           <span className="stat-value">
             {latest ? `${formatBytes(latest.memUsedBytes)} / ${formatBytes(latest.memTotalBytes)}` : "-"}
           </span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">オンラインプレイヤー</span>
+          <span className="stat-value">
+            {players?.available ? `${players.online} / ${players.max}` : "取得不可"}
+          </span>
+          {players?.available && players.names && players.names.length > 0 && (
+            <span className="stat-sub">{players.names.join(", ")}</span>
+          )}
         </div>
       </section>
 

@@ -49,6 +49,9 @@ services:
     volumes:
       # 親ディレクトリを丸ごとマウント（新サーバー追加時にmount追記不要にするため。plan.md 3.3章参照）
       - /home/maki/docker:/mnt/docker-root
+    networks:
+      - default
+      - mcmonitor-net
 
   caddy:
     build:
@@ -62,3 +65,8 @@ services:
 
 volumes:
   pgdata:
+
+networks:
+  default:
+  mcmonitor-net:
+    external: true   # 各Minecraftサーバーコンテナへ RCON 接続するための共有ネットワーク（`docker network create mcmonitor-net`で事前作成）
