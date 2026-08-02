@@ -11,6 +11,7 @@ import {
 import { useMetricsSocket } from "../hooks/useMetricsSocket";
 import { useServers } from "../hooks/useServers";
 import { ServerSwitcher } from "../components/ServerSwitcher";
+import { ServerControls } from "../components/ServerControls";
 
 function formatBytes(bytes: number): string {
   const gb = bytes / 1024 ** 3;
@@ -27,9 +28,10 @@ function formatTime(timestamp: number): string {
 
 export function Dashboard() {
   const { points, connected } = useMetricsSocket();
-  const { servers, loading: serversLoading } = useServers();
+  const { servers, loading: serversLoading, refresh: refreshServers } = useServers();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const latest = points.at(-1);
+  const selectedServer = servers.find((s) => s.id === selectedId) ?? null;
 
   useEffect(() => {
     if (selectedId === null && servers.length > 0) {
@@ -41,12 +43,15 @@ export function Dashboard() {
     <div className="dashboard">
       <header className="dashboard-header">
         <h1>minecraftMonitoring</h1>
-        <ServerSwitcher
-          servers={servers}
-          loading={serversLoading}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-        />
+        <div className="dashboard-header-controls">
+          <ServerSwitcher
+            servers={servers}
+            loading={serversLoading}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+          />
+          <ServerControls server={selectedServer} onChanged={refreshServers} />
+        </div>
       </header>
 
       <section className="stat-cards">

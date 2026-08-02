@@ -18,9 +18,16 @@ services:
     image: tecnativa/docker-socket-proxy:latest
     restart: unless-stopped
     environment:
-      # Phase 2時点では一覧/inspectのみ許可（読み取り専用）。
-      # Phase 3でstart/stop/restartを実装する際にSTART/STOP/RESTART/POSTを追加する。
+      # CONTAINERS: 一覧/inspect（GET）を許可。
+      # POST: GET以外のメソッドを許可のうえで通す元栓。ALLOW_*と併用して初めて意味を持つ。
+      # 注意: CONTAINERSとPOSTを両方1にすると、/containers配下はパスのみでの判定になるため
+      #       start/stop/restart以外（remove等）も技術的には通ってしまう。app-backend側のコードで
+      #       start/stop/restart以外を呼び出さないことで実質的なリスクを抑えている（plan.md参照）。
       CONTAINERS: 1
+      POST: 1
+      ALLOW_START: 1
+      ALLOW_STOP: 1
+      ALLOW_RESTARTS: 1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 

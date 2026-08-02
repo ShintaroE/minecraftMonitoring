@@ -38,71 +38,6 @@ h1 {
   margin: 0;
 }
 
-.loading-screen {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100svh;
-}
-
-.login-page {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100svh;
-  padding: 16px;
-}
-
-.login-form {
-  width: 100%;
-  max-width: 360px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 32px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--panel-bg);
-}
-
-.login-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 14px;
-}
-
-.login-form input {
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 15px;
-}
-
-.login-form button,
-.dashboard-header button {
-  padding: 8px 14px;
-  border: none;
-  border-radius: 6px;
-  background: var(--accent);
-  color: white;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.login-form button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.login-form .error {
-  color: var(--danger);
-  font-size: 14px;
-  margin: 0;
-}
-
 .dashboard {
   max-width: 1000px;
   margin: 0 auto;
@@ -135,6 +70,26 @@ h1 {
 .server-switcher-empty {
   font-size: 14px;
   opacity: 0.75;
+}
+
+.server-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.server-controls button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.server-controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .stat-cards {

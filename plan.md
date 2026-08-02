@@ -11,7 +11,7 @@
 - DB: **PostgreSQL**
 - リバースプロキシ: **Caddy**（nginxでも技術的には代替可。VPN内単一アプリ+WebSocket用途ではCaddyの方が設定量が少ないため引き続き推奨）
 
-> **実装状況（随時更新）**: Phase 1（PostgreSQLスキーマ + ダッシュボード）・Phase 2（docker-socket-proxy + サーバー自動検出 + 切替UI）実装・動作確認済み。認証は要件から外れたため未実装（5章参照）。次はPhase 3（start/stop/restart）。
+> **実装状況（随時更新）**: Phase 1〜3（ダッシュボード、サーバー自動検出+切替UI、start/stop/restart）実装・動作確認済み。認証は要件から外れたため未実装（5章参照）。次はPhase 4（ファイル管理）。
 
 ---
 
@@ -129,13 +129,14 @@ minecraftMonitoring/
 │   ├── src/
 │   │   ├── routes/
 │   │   │   ├── metrics.ts       # WS: ホストCPU/Mem配信
-│   │   │   └── servers.ts       # GET /api/servers（自動検出+DB同期）
-│   │   │       ↳ 今後追加: files.ts / control.ts
+│   │   │   └── servers.ts       # GET /api/servers、POST /api/servers/:id/{start,stop,restart}
+│   │   │       ↳ 今後追加: files.ts
 │   │   ├── services/
 │   │   │   ├── metricsCollector.ts
 │   │   │   ├── dockerClient.ts     # dockerode（docker-socket-proxy経由）
-│   │   │   └── serverDiscovery.ts  # label検出 + servers upsert
-│   │   │       ↳ 今後追加: dockerControl.ts（start/stop/restart） / rcon.ts / fsSafe.ts
+│   │   │   ├── serverDiscovery.ts  # label検出 + servers upsert
+│   │   │   └── dockerControl.ts    # start/stop/restart
+│   │   │       ↳ 今後追加: rcon.ts / fsSafe.ts
 │   │   ├── db/
 │   │   │   ├── schema.ts       # servers のみ
 │   │   │   └── migrations/
@@ -147,7 +148,8 @@ minecraftMonitoring/
 │   │   ├── pages/
 │   │   │   └── Dashboard.tsx
 │   │   ├── components/
-│   │   │   └── ServerSwitcher.tsx
+│   │   │   ├── ServerSwitcher.tsx
+│   │   │   └── ServerControls.tsx  # 起動/停止/再起動ボタン
 │   │   ├── api/servers.ts
 │   │   └── hooks/ (useMetricsSocket.ts, useServers.ts)
 │   └── package.json
@@ -196,9 +198,15 @@ minecraftMonitoring/
 - **停止**: docker-socket-proxy 経由で対象コンテナに `docker stop`（SIGTERM）。itzgイメージのentrypointがgraceful stop（save-all等）を内部処理するため、これが主手段。
 - **起動**: docker-socket-proxy 経由で `docker start`。
 - **再起動**: `docker restart`、または停止→起動を内部で連結。
-- **状態取得**: コンテナのHealth/Running状態（docker API）。RCONが設定されているサーバーは追加でオンラインプレイヤー数・TPSなども取得。
+- **状態取得**: コンテナのHealth/Running状態（docker API）。RCONが設定されているサーバーは追加でオンラインプレイヤー数・TPSなども取得（RCON連携自体はPhase6で実装予定、現状は未実装）。
 - 実行前にフロントで確認ダイアログを必須にする（誰でも押せるため誤操作防止が唯一の歯止め）。
 - RCONは必須要件から外し、**設定されていれば追加情報が見える任意機能**として位置づける（サーバーごとにRCON未設定でも起動/停止/再起動は問題なく行える）。
+
+**（実装済み・Phase 3）**
+- `POST /api/servers/:id/{start,stop,restart}` を実装。`dockerode`経由でdocker-socket-proxyにHTTPで接続し、`getContainer(containerName).start()/.stop()/.restart()`を呼ぶだけのシンプルな実装（RCONは未使用）。
+- フロントに起動/停止/再起動ボタンを追加。稼働中は「起動」を無効化、停止中は「停止」「再起動」を無効化。停止・再起動は`window.confirm`で確認必須（起動は非破壊的なので確認なし）。
+- 実機（重量級Forgeサーバー、Mod多数）で動作確認済み。フル起動には約70秒かかる（modloadingが重いため）。稼働中の状態からの`stop`はexit code 0でワールドのgraceful saveを確認できたが、**起動途中（modloading中）に`stop`すると exit code 137（SIGKILL）になった**。これはDocker側のデフォルト停止猶予（10秒）内にJVM側のシャットダウンフックが間に合わなかったためと推測される。実運用上は「起動完了（ヘルスチェックがhealthyになるまで）は停止操作を避ける」運用注意が必要（フロント側での警告表示は未実装、今後の検討事項）。
+- **docker-socket-proxyの権限に関する重要な注意点**: `tecnativa/docker-socket-proxy:latest`のACLはHTTPメソッドを見ずパス文字列だけで判定するルールが多く、`CONTAINERS=1`と`POST=1`を両方有効にすると`/containers/*`配下の全操作（start/stop/restart/kill/pause/unpauseに加え、コンテナ削除やrenameなど）が技術的には通ってしまう。`ALLOW_START`/`ALLOW_STOP`/`ALLOW_RESTARTS`を個別に設定しても、`CONTAINERS=1`が有効な限りこの広い許可が優先されてしまうため、厳密な最小権限化はこのプロキシでは実現できない。対策として（ユーザー承認済み）: (1) docker-socket-proxyはポートを一切ホスト公開せずapp-backendからのみ到達可能にする、(2) app-backend自身のコードはstart/stop/restart以外のDocker API呼び出しを実装しない、の2点で実質的なリスクを抑える方針とした。より厳密に絞りたくなった場合は、socket-proxyを使わず「特定のdocker CLIコマンドだけを実行できるラップスクリプト+sudo」方式への切替を検討する。
 
 ---
 
@@ -226,7 +234,13 @@ services:
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:latest   # ※ :0.4 タグは存在しないので latest を使用
     environment:
-      CONTAINERS: 1   # 現状はlist/inspectのみ許可。Phase3でSTART/STOP/RESTART/POSTを追加予定
+      CONTAINERS: 1       # list/inspect（GET）
+      POST: 1             # GET以外のメソッドを許可する元栓
+      ALLOW_START: 1
+      ALLOW_STOP: 1
+      ALLOW_RESTARTS: 1
+      # 注意: CONTAINERSとPOSTを両方1にすると、ACLがパスのみで判定されるため
+      # start/stop/restart以外（remove等）も技術的には通ってしまう（7章参照）
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
@@ -257,8 +271,8 @@ volumes:
 
 1. **Phase 1（完了）**: PostgreSQLスキーマ + ダッシュボード（ホストCPU/メモリ表示）。認証は要件変更により実装せず。
 2. **Phase 2（完了）**: docker-socket-proxy導入 + サーバー自動検出（`mcmonitor.enable`/`mcmonitor.data_path` labelをdockerode経由でスキャンし`servers`テーブルにupsert）+ サーバー切替UI（ダッシュボードのヘッダーに実装。既存`../minecraft`にlabelを付与し実際に自動検出されることを確認済み）
-3. **Phase 3（次）**: Minecraft start/stop/restart（docker-socket-proxy経由。`CONTAINERS`に加えて`START`/`STOP`/`RESTART`/`POST`環境変数を追加する必要あり）
-4. **Phase 4**: ファイル管理（一覧・DL・アップロード。まずは閲覧系から）
+3. **Phase 3（完了）**: Minecraft start/stop/restart。`POST /api/servers/:id/{start,stop,restart}` + フロントの操作ボタン（確認ダイアログ付き）を実装し、実機の重量級Forgeサーバーで動作確認済み（7章に権限まわりの注意点と運用上の注意を記載）。
+4. **Phase 4（次）**: ファイル管理（一覧・DL・アップロード。まずは閲覧系から）
 5. **Phase 5**: rename/move/delete（破壊的操作、ゴミ箱運用込み）
 6. **Phase 6**: RCON連携（プレイヤー一覧・TPSなど任意機能）
 7. **Phase 7**: 2台目のMinecraftサーバーを実際に追加し、追加コード変更なしで検出・管理できるか検証
