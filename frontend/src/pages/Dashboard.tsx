@@ -7,7 +7,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useAuth } from "../context/AuthContext";
 import { useMetricsSocket } from "../hooks/useMetricsSocket";
 
 function formatBytes(bytes: number): string {
@@ -24,7 +23,6 @@ function formatTime(timestamp: number): string {
 }
 
 export function Dashboard() {
-  const { user, logout } = useAuth();
   const { points, connected } = useMetricsSocket();
   const latest = points.at(-1);
 
@@ -32,10 +30,6 @@ export function Dashboard() {
     <div className="dashboard">
       <header className="dashboard-header">
         <h1>minecraftMonitoring</h1>
-        <div>
-          <span>{user?.username} ({user?.role})</span>
-          <button onClick={() => logout()}>ログアウト</button>
-        </div>
       </header>
 
       <section className="stat-cards">

@@ -14,4 +14,4 @@ RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY src/db/migrations ./dist/db/migrations
 EXPOSE 3000
-CMD ["sh", "-c", "node dist/db/migrate.js && node dist/seed.js && node dist/server.js"]
+CMD ["sh", "-c", "node dist/db/migrate.js && node dist/server.js"]
