@@ -11,7 +11,7 @@
 - DB: **PostgreSQL**
 - リバースプロキシ: **Caddy**（nginxでも技術的には代替可。VPN内単一アプリ+WebSocket用途ではCaddyの方が設定量が少ないため引き続き推奨）
 
-> **実装状況（随時更新）**: Phase 1〜4（ダッシュボード、サーバー自動検出+切替UI、start/stop/restart、ファイル一覧/DL/アップロード）実装・動作確認済み。認証は要件から外れたため未実装（5章参照）。次はPhase 5（rename/move/delete）。
+> **実装状況（随時更新）**: Phase 1〜5.1（ダッシュボード、サーバー自動検出+切替UI、start/stop/restart、ファイル一覧/DL/アップロード、rename/move/delete+ゴミ箱運用+フォルダZIP DL）実装・動作確認済み。認証は要件から外れたため未実装（5章参照）。次はPhase 6（RCON連携）。
 
 ---
 
@@ -184,16 +184,26 @@ minecraftMonitoring/
 | GET | `/api/servers/:id/files?path=` | ディレクトリ一覧 | 実装済み（Phase 4） |
 | GET | `/api/servers/:id/files/download?path=` | 単一ファイルDL（ストリーム） | 実装済み（Phase 4） |
 | POST | `/api/servers/:id/files/upload?path=` | アップロード（multipart, ストリーム保存） | 実装済み（Phase 4） |
-| GET | `/api/servers/:id/files/download-zip?path=` | フォルダをzip化してストリームDL | 未実装（Phase 5候補） |
-| POST | `/api/servers/:id/files/rename` | `{from, to}` | 未実装（Phase 5） |
-| POST | `/api/servers/:id/files/move` | `{from, to}` | 未実装（Phase 5） |
-| DELETE | `/api/servers/:id/files?path=` | 削除（フロントで確認ダイアログ必須） | 未実装（Phase 5） |
+| GET | `/api/servers/:id/files/download-zip?path=` | フォルダをzip化してストリームDL | 実装済み（Phase 5.1） |
+| POST | `/api/servers/:id/files/rename` | `{from, to}`。同一ディレクトリ内の名前変更にも、別ディレクトリへの移動（＝「移動」機能）にも使う（`fs.rename`ベースのため） | 実装済み（Phase 5） |
+| DELETE | `/api/servers/:id/files?path=` | 削除。`.trash/`外のものは`.trash/`へ退避、`.trash/`内のものは物理削除（フロントで確認ダイアログ必須） | 実装済み（Phase 5、Phase 5.1でバグ修正） |
 
 **Phase 4実装メモ**:
 - 共有ルートは`/home/maki/docker`をapp-backendに`rw`マウント（`SHARED_ROOT=/mnt/docker-root`）。3.3章の設計通り、新サーバー追加時もmount追記不要。
 - シンボリックリンクは一覧から除外し、`fs.realpath`で解決した実体パスが共有ルート外を指す場合も拒否（`services/fsSafe.ts`）。パストラバーサル（`../`や`%2e%2e`等）は実機で400になることを確認済み。
 - アップロードのファイル名は`path.basename()`のみ使用し、ファイル名経由のディレクトリトラバーサルを防止。アップロード上限は2GB（`@fastify/multipart`の`limits.fileSize`）。
 - 稼働中サーバーへの書き込み（アップロード）に制限は設けていない（下記セキュリティ設計の「稼働中は制限」は未実装のまま）。実際にworldフォルダ稼働中に書き込むとどうなるかは未検証。運用上は「アップロードはサーバー停止中に行う」を当面のルールとして推奨。
+
+**Phase 5実装メモ**:
+- `move`は独立エンドポイントにせず`rename`に統合（どちらも`fs.rename(from, to)`で同じ処理のため）。
+- `rename`は移動先(`to`)に既存ファイル/フォルダがある場合`409 destination_exists`を返し、暗黙の上書きを防止。
+- 削除は物理削除ではなく`{data_path}/.trash/{timestamp}-{元のファイル名}`へ`fs.rename`で退避するのみ。定期パージ（保持期間経過後の自動物理削除）は未実装 — `.trash`は放置すると増え続ける。`.trash`自体はファイルブラウザ上に通常のフォルダとして表示されるため、専用の復元UIがなくても中身を見て手動で「名前変更」すれば元の場所に戻せる。
+- **実装中に発見した問題と対応（1）**: `.trash`ディレクトリをbackendコンテナ（root権限で実行）が新規作成すると、ホスト側でroot所有になり、実運用ユーザー（`maki`）がsudoなしで削除できなくなることが実機検証で判明した。`backend/Dockerfile`に`USER node`を追加し、`node:24-slim`ベースイメージに標準で入っている`node`ユーザー（uid/gid 1000）で実行するよう修正。ホストの`maki`ユーザーも uid 1000 のため、以後アプリが共有マウント上に作成するファイル/フォルダはすべて`maki`所有になり、sudo不要で管理できる。
+
+**Phase 5.1（ユーザー指摘による追加修正）**:
+- **バグ修正**: `.trash`内のファイルを削除しようとすると、`.trash`へ再度退避するだけで同じ場所に残り続け「削除できない」ように見える不具合があった。削除対象が既に`.trash`配下にある場合は`fs.rm(recursive:true, force:true)`で物理削除するよう修正（`routes/files.ts`）。
+- **移動機能を追加**: 各行に「移動」ボタンを追加。`window.prompt`でフルパス（ディレクトリ込み）を編集させ、`rename`エンドポイント（`{from, to}`）を呼ぶことで実現。ドラッグ&ドロップやディレクトリピッカーは実装していない。
+- **フォルダのZIPダウンロードを追加**: `archiver`パッケージ（v8、クラスベースAPI: `new ZipArchive()` → `.directory()` → `.finalize()`）で`GET /api/servers/:id/files/download-zip?path=`を実装。フォルダ行に「ZIP DL」ボタン、ツールバーに「このフォルダをZIPでDL」ボタンを追加。ストリーミングでバッファに溜めずに返す。
 
 ### セキュリティ設計（最重要）
 - 操作対象パスは常に「共有ルート(`/home/maki/docker`) + 対象サーバーの `data_path`」配下に**正規化(path.resolve)した上で prefix チェック**し、`..` によるパストラバーサルおよびサーバー間の越境アクセスを遮断。
@@ -287,8 +297,9 @@ volumes:
 2. **Phase 2（完了）**: docker-socket-proxy導入 + サーバー自動検出（`mcmonitor.enable`/`mcmonitor.data_path` labelをdockerode経由でスキャンし`servers`テーブルにupsert）+ サーバー切替UI（ダッシュボードのヘッダーに実装。既存`../minecraft`にlabelを付与し実際に自動検出されることを確認済み）
 3. **Phase 3（完了）**: Minecraft start/stop/restart。`POST /api/servers/:id/{start,stop,restart}` + フロントの操作ボタン（確認ダイアログ付き）を実装し、実機の重量級Forgeサーバーで動作確認済み（7章に権限まわりの注意点と運用上の注意を記載）。
 4. **Phase 4（完了）**: ファイル管理（一覧・DL・アップロード）。フロントはタブUI（ダッシュボード/ファイル）に再構成し、`App.tsx`でサーバー切替・操作ボタンを共通ヘッダー化。実機の`minecraft`コンテナに対し一覧・ダウンロード・アップロードとパストラバーサル対策を確認済み。
-5. **Phase 5（次）**: rename/move/delete（破壊的操作、ゴミ箱運用込み）
-6. **Phase 6**: RCON連携（プレイヤー一覧・TPSなど任意機能）
+5. **Phase 5（完了）**: rename/delete（ゴミ箱運用込み）。実機で名前変更・削除・.trash退避・パストラバーサル/上書き防止を確認済み。副産物として、backendコンテナがrootで動いていたため`.trash`がroot所有になりホストユーザーが削除できない問題を発見・修正（`USER node`化）。
+   - **Phase 5.1（完了・ユーザーフィードバック対応）**: `.trash`内ファイルが削除できないバグを修正、移動機能（フルパス指定）とフォルダZIPダウンロードを追加。
+6. **Phase 6（次）**: RCON連携（プレイヤー一覧・TPSなど任意機能）
 7. **Phase 7**: 2台目のMinecraftサーバーを実際に追加し、追加コード変更なしで検出・管理できるか検証
 
 （旧Phase 6にあった「監査ログ画面」「ユーザー管理画面」は認証を実装しない方針のため削除）

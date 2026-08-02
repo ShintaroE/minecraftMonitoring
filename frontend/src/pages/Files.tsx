@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Server } from "../api/servers";
-import { downloadUrl, fetchFiles, uploadFile, type FileEntry } from "../api/files";
+import { deleteFile, downloadUrl, downloadZipUrl, fetchFiles, renameFile, uploadFile, type FileEntry } from "../api/files";
 import { formatBytes, formatDateTime } from "../lib/format";
 
 interface Props {
@@ -17,6 +17,7 @@ export function Files({ server }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [busyName, setBusyName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -58,6 +59,60 @@ export function Files({ server }: Props) {
     }
   }
 
+  async function handleRename(entry: FileEntry) {
+    if (!server) return;
+    const newName = window.prompt("新しい名前を入力してください。", entry.name);
+    if (!newName || newName === entry.name) return;
+
+    setBusyName(entry.name);
+    setError(null);
+    try {
+      await renameFile(server.id, joinPath(currentPath, entry.name), joinPath(currentPath, newName));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error && err.message === "destination_exists" ? "同名のファイル/フォルダが既に存在します。" : "名前変更に失敗しました。");
+    } finally {
+      setBusyName(null);
+    }
+  }
+
+  async function handleMove(entry: FileEntry) {
+    if (!server) return;
+    const currentFullPath = joinPath(currentPath, entry.name);
+    const newFullPath = window.prompt(
+      "移動先のパスを入力してください（フォルダも含めて指定できます）。",
+      currentFullPath,
+    );
+    if (!newFullPath || newFullPath === currentFullPath) return;
+
+    setBusyName(entry.name);
+    setError(null);
+    try {
+      await renameFile(server.id, currentFullPath, newFullPath);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error && err.message === "destination_exists" ? "移動先に同名のファイル/フォルダが既に存在します。" : "移動に失敗しました。");
+    } finally {
+      setBusyName(null);
+    }
+  }
+
+  async function handleDelete(entry: FileEntry) {
+    if (!server) return;
+    if (!window.confirm(`「${entry.name}」を削除します。よろしいですか？\n（.trash フォルダへ退避されます）`)) return;
+
+    setBusyName(entry.name);
+    setError(null);
+    try {
+      await deleteFile(server.id, joinPath(currentPath, entry.name));
+      await load();
+    } catch {
+      setError("削除に失敗しました。");
+    } finally {
+      setBusyName(null);
+    }
+  }
+
   if (!server) {
     return <p className="files-empty">サーバーを選択してください。</p>;
   }
@@ -78,16 +133,21 @@ export function Files({ server }: Props) {
             </span>
           ))}
         </nav>
-        <label className="upload-button">
-          {uploading ? "アップロード中..." : "アップロード"}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            disabled={uploading}
-            onChange={(e) => handleUpload(e.target.files)}
-          />
-        </label>
+        <div className="files-toolbar-actions">
+          <a className="upload-button" href={downloadZipUrl(server.id, currentPath)}>
+            このフォルダをZIPでDL
+          </a>
+          <label className="upload-button">
+            {uploading ? "アップロード中..." : "アップロード"}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              disabled={uploading}
+              onChange={(e) => handleUpload(e.target.files)}
+            />
+          </label>
+        </div>
       </div>
 
       {error && <p className="error">{error}</p>}
@@ -98,17 +158,18 @@ export function Files({ server }: Props) {
             <th>名前</th>
             <th>サイズ</th>
             <th>更新日時</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           {loading && (
             <tr>
-              <td colSpan={3}>読み込み中...</td>
+              <td colSpan={4}>読み込み中...</td>
             </tr>
           )}
           {!loading && entries.length === 0 && (
             <tr>
-              <td colSpan={3}>ファイルがありません。</td>
+              <td colSpan={4}>ファイルがありません。</td>
             </tr>
           )}
           {!loading &&
@@ -133,6 +194,24 @@ export function Files({ server }: Props) {
                 </td>
                 <td>{entry.type === "file" ? formatBytes(entry.size) : "-"}</td>
                 <td>{formatDateTime(entry.mtime)}</td>
+                <td className="file-row-actions">
+                  {entry.type === "directory" && (
+                    <a
+                      href={downloadZipUrl(server.id, joinPath(currentPath, entry.name))}
+                    >
+                      ZIP DL
+                    </a>
+                  )}
+                  <button disabled={busyName !== null} onClick={() => handleRename(entry)}>
+                    名前変更
+                  </button>
+                  <button disabled={busyName !== null} onClick={() => handleMove(entry)}>
+                    移動
+                  </button>
+                  <button disabled={busyName !== null} onClick={() => handleDelete(entry)}>
+                    削除
+                  </button>
+                </td>
               </tr>
             ))}
         </tbody>

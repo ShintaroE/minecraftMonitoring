@@ -4,8 +4,11 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { ZipArchive } from "archiver";
 import { getServerById } from "../services/serverLookup.js";
 import { dataRootFor, resolveServerPath, assertRealPathWithinRoot, PathViolationError } from "../services/fsSafe.js";
+
+const TRASH_DIR_NAME = ".trash";
 
 const paramsSchema = z.object({ id: z.coerce.number().int().positive() });
 const pathQuerySchema = z.object({ path: z.string().optional().default("") });
@@ -102,6 +105,35 @@ export async function fileRoutes(app: FastifyInstance) {
     return reply.send(createReadStream(resolved.target));
   });
 
+  app.get("/api/servers/:id/files/download-zip", async (request, reply) => {
+    const resolved = await resolveRequestTarget(request, reply);
+    if (!resolved) return;
+
+    let stat;
+    try {
+      stat = await fs.stat(resolved.target);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return reply.code(404).send({ error: "not_found" });
+      }
+      throw err;
+    }
+    if (!stat.isDirectory()) {
+      return reply.code(400).send({ error: "not_a_directory" });
+    }
+
+    const zipName = `${path.basename(resolved.target) || "root"}.zip`;
+    reply.header("Content-Disposition", `attachment; filename="${encodeURIComponent(zipName)}"`);
+    reply.type("application/zip");
+
+    const archive = new ZipArchive({ zlib: { level: 6 } });
+    archive.on("error", (err) => request.log.error(err, "zip archive failed"));
+    archive.directory(resolved.target, false);
+    void archive.finalize();
+
+    return reply.send(archive);
+  });
+
   app.post("/api/servers/:id/files/upload", async (request, reply) => {
     const resolved = await resolveRequestTarget(request, reply);
     if (!resolved) return;
@@ -128,5 +160,84 @@ export async function fileRoutes(app: FastifyInstance) {
     }
 
     return { ok: true, name: safeName };
+  });
+
+  const renameBodySchema = z.object({ from: z.string().min(1), to: z.string().min(1) });
+
+  app.post("/api/servers/:id/files/rename", async (request, reply) => {
+    const params = paramsSchema.safeParse(request.params);
+    const body = renameBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+
+    const server = await getServerById(params.data.id);
+    if (!server) {
+      return reply.code(404).send({ error: "server_not_found" });
+    }
+
+    const root = dataRootFor(server.dataPath);
+    let fromTarget: string;
+    let toTarget: string;
+    try {
+      fromTarget = resolveServerPath(server.dataPath, body.data.from);
+      toTarget = resolveServerPath(server.dataPath, body.data.to);
+      await assertRealPathWithinRoot(fromTarget, root);
+    } catch (err) {
+      if (err instanceof PathViolationError) {
+        return reply.code(400).send({ error: "invalid_path" });
+      }
+      throw err;
+    }
+
+    if (toTarget === root) {
+      return reply.code(400).send({ error: "invalid_path" });
+    }
+
+    const destExists = await fs.stat(toTarget).catch(() => null);
+    if (destExists) {
+      return reply.code(409).send({ error: "destination_exists" });
+    }
+
+    try {
+      await fs.rename(fromTarget, toTarget);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return reply.code(404).send({ error: "not_found" });
+      }
+      throw err;
+    }
+
+    return { ok: true };
+  });
+
+  app.delete("/api/servers/:id/files", async (request, reply) => {
+    const resolved = await resolveRequestTarget(request, reply);
+    if (!resolved) return;
+
+    if (resolved.target === resolved.root) {
+      return reply.code(400).send({ error: "cannot_delete_root" });
+    }
+
+    const stat = await fs.stat(resolved.target).catch(() => null);
+    if (!stat) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+
+    const trashDir = path.join(resolved.root, TRASH_DIR_NAME);
+
+    // 既に .trash 配下にあるものを削除する場合は、再度 .trash へ退避しても
+    // 見た目上その場に残り続けて「削除できない」ように見えてしまうため、物理削除する。
+    if (resolved.target === trashDir || resolved.target.startsWith(trashDir + path.sep)) {
+      await fs.rm(resolved.target, { recursive: true, force: true });
+      return { ok: true, permanentlyDeleted: true };
+    }
+
+    // 通常の削除は即時物理削除ではなく、共有ルート直下の .trash/ へ退避する（誤削除対策）。
+    await fs.mkdir(trashDir, { recursive: true });
+    const trashName = `${Date.now()}-${path.basename(resolved.target)}`;
+    await fs.rename(resolved.target, path.join(trashDir, trashName));
+
+    return { ok: true, trashedAs: trashName };
   });
 }

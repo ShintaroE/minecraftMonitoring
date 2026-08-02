@@ -181,6 +181,11 @@ h1 {
   padding: 0;
 }
 
+.files-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .upload-button {
   position: relative;
   display: inline-block;
@@ -238,4 +243,35 @@ h1 {
 
 .file-link:hover {
   text-decoration: underline;
+}
+
+.file-row-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.file-row-actions button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.file-row-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.file-row-actions a {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  text-decoration: none;
 }
