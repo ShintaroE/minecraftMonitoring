@@ -338,13 +338,27 @@ select {
   margin: 0 0 12px;
 }
 
-/* ---------- Stat cards ---------- */
+/* ---------- Stat groups ---------- */
+
+.stat-group {
+  padding: 16px;
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+}
+
+.stat-group-title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
 
 .stat-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px;
-  margin-bottom: 20px;
 }
 
 .stat-card {
@@ -389,13 +403,10 @@ select {
   color: var(--text-strong);
 }
 
-/* ---------- Players panel ---------- */
+/* ---------- Chart ---------- */
 
-.players-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 18px;
+.chart-container {
+  padding: 16px 16px 12px;
   margin-bottom: 20px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -403,37 +414,61 @@ select {
   box-shadow: var(--shadow-xs);
 }
 
-.players-panel-label {
-  font-size: 12.5px;
+/* ---------- Players table ---------- */
+
+.players-table-section {
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+}
+
+.players-online-line {
+  margin: 0 0 12px;
+  font-size: 13.5px;
   color: var(--text-muted);
-  font-weight: 500;
 }
 
-.player-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.player-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-/* ---------- Chart ---------- */
-
-.chart-container {
-  padding: 20px 16px 12px;
+.players-table-wrap {
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--surface);
   box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+
+.players-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.players-table th,
+.players-table td {
+  padding: 8px 16px;
+  text-align: left;
+}
+
+.players-table thead th {
+  background: var(--surface-2);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+.players-table tbody tr {
+  border-bottom: 1px solid var(--border);
+}
+
+.players-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.players-table tbody tr:hover {
+  background: var(--surface-2);
 }
 
 /* ---------- Files ---------- */
