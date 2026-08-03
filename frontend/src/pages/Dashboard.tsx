@@ -7,9 +7,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { Server } from "../api/servers";
+import type { ContainerStatsResponse, Server } from "../api/servers";
 import { useMetricsSocket } from "../hooks/useMetricsSocket";
 import { useRconPlayers } from "../hooks/useRconPlayers";
+import { useContainerStats } from "../hooks/useContainerStats";
 import { formatBytes } from "../lib/format";
 import { CpuIcon, MemoryIcon, UsersIcon, WifiIcon } from "../components/icons";
 
@@ -25,10 +26,35 @@ function formatTime(timestamp: number): string {
   });
 }
 
+function formatServerStat(
+  server: Server | null,
+  stats: ContainerStatsResponse | null,
+  formatter: (s: Required<ContainerStatsResponse>) => string,
+): string {
+  if (!server || !stats) return "-";
+  if (
+    !stats.available ||
+    typeof stats.cpuPercent !== "number" ||
+    typeof stats.memUsedBytes !== "number" ||
+    typeof stats.memUsedPercent !== "number"
+  ) {
+    return "停止中";
+  }
+  return formatter(stats as Required<ContainerStatsResponse>);
+}
+
 export function Dashboard({ server }: Props) {
   const { points, connected } = useMetricsSocket();
   const players = useRconPlayers(server?.id ?? null);
+  const stats = useContainerStats(server?.id ?? null);
   const latest = points.at(-1);
+
+  const serverCpuValue = formatServerStat(server, stats, (s) => `${s.cpuPercent.toFixed(1)}%`);
+  const serverMemValue = formatServerStat(
+    server,
+    stats,
+    (s) => `${s.memUsedPercent.toFixed(1)}%（${formatBytes(s.memUsedBytes)}）`,
+  );
 
   return (
     <>
@@ -44,16 +70,23 @@ export function Dashboard({ server }: Props) {
           <span className="stat-icon">
             <CpuIcon />
           </span>
-          <span className="stat-label">CPU使用率</span>
+          <span className="stat-label">ホストCPU使用率</span>
           <span className="stat-value">
             {latest ? `${latest.cpuLoadPercent.toFixed(1)}%` : "-"}
           </span>
         </div>
         <div className="stat-card">
           <span className="stat-icon">
+            <CpuIcon />
+          </span>
+          <span className="stat-label">サーバーCPU使用率</span>
+          <span className="stat-value">{serverCpuValue}</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-icon">
             <MemoryIcon />
           </span>
-          <span className="stat-label">メモリ使用率</span>
+          <span className="stat-label">ホストメモリ使用率</span>
           <span className="stat-value">
             {latest ? `${latest.memUsedPercent.toFixed(1)}%` : "-"}
           </span>
@@ -62,7 +95,14 @@ export function Dashboard({ server }: Props) {
           <span className="stat-icon">
             <MemoryIcon />
           </span>
-          <span className="stat-label">メモリ使用量</span>
+          <span className="stat-label">サーバーメモリ使用率</span>
+          <span className="stat-value">{serverMemValue}</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-icon">
+            <MemoryIcon />
+          </span>
+          <span className="stat-label">ホストメモリ使用量</span>
           <span className="stat-value">
             {latest ? `${formatBytes(latest.memUsedBytes)} / ${formatBytes(latest.memTotalBytes)}` : "-"}
           </span>
@@ -75,11 +115,21 @@ export function Dashboard({ server }: Props) {
           <span className="stat-value">
             {players?.available ? `${players.online} / ${players.max}` : "取得不可"}
           </span>
-          {players?.available && players.names && players.names.length > 0 && (
-            <span className="stat-sub">{players.names.join(", ")}</span>
-          )}
         </div>
       </section>
+
+      {players?.available && players.names && players.names.length > 0 && (
+        <section className="players-panel">
+          <span className="players-panel-label">オンラインプレイヤー</span>
+          <div className="player-chips">
+            {players.names.map((name) => (
+              <span className="player-chip" key={name}>
+                {name}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="chart-container">
         <ResponsiveContainer width="100%" height={320}>

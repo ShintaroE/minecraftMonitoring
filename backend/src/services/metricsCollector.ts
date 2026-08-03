@@ -18,3 +18,8 @@ export async function getMetricsSnapshot(): Promise<MetricsSnapshot> {
     memTotalBytes: mem.total,
   };
 }
+
+export async function getHostTotalMemoryBytes(): Promise<number> {
+  const mem = await si.mem();
+  return mem.total;
+}
