@@ -35,7 +35,7 @@ export function Files({ server }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [server, currentPath]);
+  }, [server?.id, currentPath]);
 
   useEffect(() => {
     setCurrentPath("");
