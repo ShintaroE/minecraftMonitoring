@@ -162,3 +162,20 @@ export function UsersIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+export function PowerIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M12 2v8" />
+      <path d="M6.3 6.3a8 8 0 1 0 11.4 0" />
+    </Icon>
+  );
+}
+
+export function PuzzleIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M9 3h4a1 1 0 0 1 1 1v2.2a1.8 1.8 0 1 0 0 3.6V12a1 1 0 0 1-1 1h-2.2a1.8 1.8 0 1 0-3.6 0H5a1 1 0 0 1-1-1V9a1.8 1.8 0 1 0 0-3.6V4a1 1 0 0 1 1-1h2.2a1.8 1.8 0 1 0 3.6 0Z" />
+    </Icon>
+  );
+}

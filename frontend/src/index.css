@@ -647,3 +647,45 @@ select {
   accent-color: var(--accent);
   cursor: pointer;
 }
+
+/* ---------- Mods ---------- */
+
+.mods-hint {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.mod-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.mod-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mod-status-badge.enabled {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.mod-status-badge.disabled {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.mod-row-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}

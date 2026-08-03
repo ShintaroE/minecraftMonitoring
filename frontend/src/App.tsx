@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Dashboard } from "./pages/Dashboard";
+import { Mods } from "./pages/Mods";
 import { Files } from "./pages/Files";
 import { ServerSwitcher } from "./components/ServerSwitcher";
 import { ServerControls } from "./components/ServerControls";
 import { useServers } from "./hooks/useServers";
 
-type Tab = "dashboard" | "files";
+type Tab = "dashboard" | "mods" | "files";
 
 function App() {
   const { servers, loading: serversLoading, refresh: refreshServers } = useServers();
@@ -31,6 +32,9 @@ function App() {
             <button className={tab === "dashboard" ? "active" : ""} onClick={() => setTab("dashboard")}>
               ダッシュボード
             </button>
+            <button className={tab === "mods" ? "active" : ""} onClick={() => setTab("mods")}>
+              MOD
+            </button>
             <button className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
               ファイル
             </button>
@@ -47,7 +51,9 @@ function App() {
         </div>
       </header>
 
-      {tab === "dashboard" ? <Dashboard server={selectedServer} /> : <Files server={selectedServer} />}
+      {tab === "dashboard" && <Dashboard server={selectedServer} />}
+      {tab === "mods" && <Mods server={selectedServer} />}
+      {tab === "files" && <Files server={selectedServer} />}
     </div>
   );
 }
