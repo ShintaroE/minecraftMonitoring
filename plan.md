@@ -11,7 +11,7 @@
 - DB: **PostgreSQL**
 - リバースプロキシ: **Caddy**（nginxでも技術的には代替可。VPN内単一アプリ+WebSocket用途ではCaddyの方が設定量が少ないため引き続き推奨）
 
-> **実装状況（随時更新）**: Phase 1〜6（ダッシュボード、サーバー自動検出+切替UI、start/stop/restart、ファイル一覧/DL/アップロード、rename/move/delete+ゴミ箱運用+フォルダZIP DL、RCON連携）実装・動作確認済み。認証は要件から外れたため未実装（5章参照）。次はPhase 7（2台目サーバー追加検証）。
+> **実装状況（随時更新）**: Phase 1〜6（ダッシュボード、サーバー自動検出+切替UI、start/stop/restart、ファイル一覧/DL/アップロード、rename/move/delete+ゴミ箱運用+フォルダZIP DL、RCON連携）に加え、MODタブ（管理＋追加/削除履歴、12章）も実装・動作確認済み。認証は要件から外れたため未実装（5章参照）。次はPhase 7（2台目サーバー追加検証）。
 
 ---
 
@@ -130,10 +130,12 @@ minecraftMonitoring/
 │   ├── src/
 │   │   ├── routes/
 │   │   │   ├── metrics.ts       # WS: ホストCPU/Mem配信
-│   │   │   ├── servers.ts       # GET /api/servers、POST /api/servers/:id/{start,stop,restart}
-│   │   │   └── files.ts         # GET一覧/download、POST upload
+│   │   │   ├── servers.ts       # GET /api/servers、POST /api/servers/:id/{start,stop,restart}、GET .../stats
+│   │   │   ├── files.ts         # GET一覧/download/download-zip、POST upload/rename、DELETE
+│   │   │   └── mods.ts          # MOD専用: upload/delete + 追加/削除履歴・バックアップDL
 │   │   ├── services/
 │   │   │   ├── metricsCollector.ts
+│   │   │   ├── containerStats.ts   # コンテナ単体のCPU/メモリ（dockerode stats）
 │   │   │   ├── dockerClient.ts     # dockerode（docker-socket-proxy経由）
 │   │   │   ├── serverDiscovery.ts  # label検出 + servers upsert
 │   │   │   ├── dockerControl.ts    # start/stop/restart
@@ -141,7 +143,7 @@ minecraftMonitoring/
 │   │   │   ├── fsSafe.ts           # パストラバーサル対策込みパス解決
 │   │   │   └── rcon.ts             # .rcon-cli.env読み取り + RCON接続 + list解析
 │   │   ├── db/
-│   │   │   ├── schema.ts       # servers のみ
+│   │   │   ├── schema.ts       # servers, mod_events
 │   │   │   └── migrations/
 │   │   ├── env.ts
 │   │   └── server.ts
@@ -150,16 +152,19 @@ minecraftMonitoring/
 │   ├── src/
 │   │   ├── pages/
 │   │   │   ├── Dashboard.tsx
-│   │   │   └── Files.tsx           # ファイルブラウザ（一覧/DL/アップロード）
+│   │   │   ├── Files.tsx           # ファイルブラウザ（一覧/DL/アップロード/rename/move/delete）
+│   │   │   ├── Mods.tsx            # MODタブのコンテナ（内部サブタブ切替）
+│   │   │   ├── ModsManage.tsx      # MOD管理サブタブ
+│   │   │   └── ModsHistory.tsx     # 追加/削除履歴サブタブ
 │   │   ├── components/
 │   │   │   ├── ServerSwitcher.tsx
 │   │   │   └── ServerControls.tsx  # 起動/停止/再起動ボタン
-│   │   ├── api/ (servers.ts, files.ts, rcon.ts)
+│   │   ├── api/ (servers.ts, files.ts, rcon.ts, mods.ts)
 │   │   ├── lib/format.ts           # formatBytes / formatDateTime
-│   │   ├── hooks/ (useMetricsSocket.ts, useServers.ts, useRconPlayers.ts)
+│   │   ├── hooks/ (useMetricsSocket.ts, useServers.ts, useRconPlayers.ts, useContainerStats.ts)
 │   │   └── App.tsx                 # ヘッダー（サーバー切替+操作+タブ）を集約するレイアウト
 │   └── package.json
-└── (DBデータは postgres コンテナの named volume `pgdata` で永続化)
+└── (DBデータは postgres コンテナの named volume `pgdata`、MODバックアップは `mod_backups` で永続化)
 ```
 
 ---
@@ -324,7 +329,8 @@ networks:
 5. **Phase 5（完了）**: rename/delete（ゴミ箱運用込み）。実機で名前変更・削除・.trash退避・パストラバーサル/上書き防止を確認済み。副産物として、backendコンテナがrootで動いていたため`.trash`がroot所有になりホストユーザーが削除できない問題を発見・修正（`USER node`化）。
    - **Phase 5.1（完了・ユーザーフィードバック対応）**: `.trash`内ファイルが削除できないバグを修正、移動機能（フルパス指定）とフォルダZIPダウンロードを追加。
 6. **Phase 6（完了）**: RCON連携。外部Dockerネットワーク`mcmonitor-net`を作成してapp-backendと各Minecraftコンテナを参加させ、`.rcon-cli.env`のパスワードでRCON接続、`list`コマンドでオンラインプレイヤー数・名前を取得しダッシュボードに表示。実機で0人在線を確認済み（TPS等の追加コマンドは未実装）。
-7. **Phase 7（次）**: 2台目のMinecraftサーバーを実際に追加し、追加コード変更なしで検出・管理できるか検証（`mcmonitor-net`への参加も含めて手順化する）
+7. **MODタブ（完了、詳細は12章）**: MOD管理（一覧・アップロード・有効/無効切替・削除）+ 追加/削除履歴（バックアップ保存・個別/一括ZIPダウンロード）。ダッシュボード改修（ホスト/サーバー比較カード、セクション分割等）も並行して実施済み。
+8. **Phase 7（次）**: 2台目のMinecraftサーバーを実際に追加し、追加コード変更なしで検出・管理できるか検証（`mcmonitor-net`への参加も含めて手順化する）
 
 （旧Phase 6にあった「監査ログ画面」「ユーザー管理画面」は認証を実装しない方針のため削除）
 
@@ -337,3 +343,34 @@ networks:
 - 通知: サーバーダウン検知やCPU高負荷アラートをDiscord Webhookに飛ばす拡張。
 - テキストファイル編集: `server.properties` や `config/*` の中身をブラウザ上で直接編集できるエディタ機能はファイル管理の自然な拡張（要望あれば追加設計）。
 - nginxへの切替: 採用する場合は Caddyfile 相当の設定を nginx.conf + WebSocket用ヘッダー追記で置き換えるのみで、他コンポーネントへの影響はなし。
+
+---
+
+## 12. MODタブ（実装済み）
+
+MODタブはダッシュボードとファイルタブの間にあり、「MOD管理」「追加/削除履歴」の2つの内部サブタブに分かれる（`frontend/src/pages/Mods.tsx` が薄いコンテナ、中身は `ModsManage.tsx` / `ModsHistory.tsx`）。
+
+### 12.1 MOD管理サブタブ
+- `mods/` フォルダに固定した専用UI。一覧・アップロード（`.jar`のみ、フロント側で拡張子検証）・有効/無効切替（`foo.jar` ⇄ `foo.jar.disabled` のリネーム）・削除（`.trash`退避）。
+- 有効/無効切替は汎用の `POST /api/servers/:id/files/rename` をそのまま使う（履歴には残らない）。
+- 上部に「反映にはサーバー再起動が必要」の注意書きを表示。
+
+### 12.2 追加/削除履歴サブタブ
+MODタブ経由のアップロード・削除のみを対象に、いつ・何が追加/削除されたかを記録し、追加分は後から（無効化・削除されていても）ダウンロードできるようにする機能。
+
+- **DB**: `mod_events` テーブル（`server_id`, `event_type`（`added`/`deleted`）, `file_name`, `file_size`, `created_at`）。有効/無効の切替は記録しない。
+- **バックアップストレージ**: アップロード時点のファイル実体を、Minecraftの共有マウント（`SHARED_ROOT`）とは別の named volume `mod_backups`（`app-backend` に `/app/data/mod-backups` としてマウント、`MOD_BACKUP_ROOT` 環境変数）にコピー保存する。パスは `{MOD_BACKUP_ROOT}/{serverId}/{eventId}.jar` として `eventId` から導出（DBにパスは持たない）。削除イベントにはバックアップを作らない（ダウンロード機能なし、記録のみという要件のため）。
+- **新規バックエンドルート**（`backend/src/routes/mods.ts`、汎用ファイルAPIとは独立）:
+  - `POST /api/servers/:id/mods/upload`: `.jar`検証（サーバー側でも実施）→ `mods/`へ書き込み → `mod_events`にINSERT → バックアップへコピー。
+  - `DELETE /api/servers/:id/mods/:fileName`: `.trash`退避 → `mod_events`にINSERT（`.disabled`サフィックスを除いた正規名で記録）。
+  - `GET /api/servers/:id/mods/history`: 該当サーバーのイベント一覧（`createdAt`降順）。日付ごとのグルーピングはフロント側でローカルタイムゾーンに基づいて行う（サーバー側でタイムゾーンを意識しないため）。
+  - `GET /api/servers/:id/mods/history/:eventId/download`: 個別バックアップのダウンロード。
+  - `GET /api/servers/:id/mods/history/download-zip?eventIds=1,2,3`: 指定した複数`eventId`のバックアップをまとめてZIP（`files.ts`のフォルダZIPと同じ`archiver`を再利用）。
+- **フロント**: 日付ごとのカードで「追加（N件）」「削除（N件）」に分けて表示。追加セクションは各行に個別ダウンロード、カード単位で「この日の追加分を一括ダウンロード」ボタン。削除セクションはダウンロードなし（閲覧のみ）。
+
+### 12.3 実装中に発見した問題と対応
+新規追加した named volume `mod_backups` は初回作成時にroot所有になり、`app-backend`（`USER node`で実行）から書き込めず`EACCES`で500エラーになる不具合が実機検証で発生した。`backend/Dockerfile`でイメージビルド時に`/app/data/mod-backups`を`node`ユーザー所有で事前作成しておくことで、named volumeの初回マウント時にその所有者情報が引き継がれるようにして解消した（`.trash`のroot所有問題と同種の原因）。
+
+### 12.4 既知の制約
+- バックアップファイルは自動で削除されない（`.trash`と同様、容量は増え続ける）。将来的に保持期間ポリシーが必要になる可能性がある。
+- 履歴はMODタブ経由の操作のみが対象。ファイルタブから直接`mods/`を操作した場合は記録されない。

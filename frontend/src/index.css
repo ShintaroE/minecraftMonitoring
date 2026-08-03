@@ -689,3 +689,102 @@ select {
   gap: 4px;
   justify-content: flex-end;
 }
+
+.mods-subtabs {
+  margin-bottom: 16px;
+  display: inline-flex;
+}
+
+/* ---------- Mod history ---------- */
+
+.mod-history {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mod-history-card {
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-xs);
+}
+
+.mod-history-date-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.mod-history-date {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.mod-history-section {
+  margin-top: 12px;
+}
+
+.mod-history-section:first-of-type {
+  margin-top: 0;
+}
+
+.mod-history-section-title {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mod-history-section-title.added {
+  color: var(--success);
+}
+
+.mod-history-section-title.deleted {
+  color: var(--danger);
+}
+
+.mod-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.mod-history-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+}
+
+.mod-history-row:last-child {
+  border-bottom: none;
+}
+
+.mod-history-name {
+  flex: 1;
+  font-weight: 500;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-history-meta {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
