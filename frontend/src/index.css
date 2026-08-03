@@ -415,12 +415,21 @@ select {
 }
 
 .files-toolbar {
+  position: sticky;
+  top: 84px;
+  z-index: 9;
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 14px;
   gap: 12px;
   flex-wrap: wrap;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
 .breadcrumb {
@@ -461,7 +470,29 @@ select {
 
 .files-toolbar-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.selection-count {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 10px;
+  margin-right: 4px;
+  border-right: 1px solid var(--border);
+}
+
+.btn-disabled-link {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .file-table-wrap {
@@ -540,8 +571,15 @@ select {
   color: var(--accent);
 }
 
-.file-row-actions {
-  display: flex;
-  gap: 4px;
-  justify-content: flex-end;
+.file-table th.col-checkbox,
+.file-table td.col-checkbox {
+  width: 40px;
+  padding-right: 0;
+}
+
+.col-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
 }

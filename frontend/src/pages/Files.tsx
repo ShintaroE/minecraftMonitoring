@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Server } from "../api/servers";
 import { deleteFile, downloadUrl, downloadZipUrl, fetchFiles, renameFile, uploadFile, type FileEntry } from "../api/files";
 import { formatBytes, formatDateTime } from "../lib/format";
-import { ArchiveIcon, ChevronRightIcon, EditIcon, FileIcon, FolderIcon, MoveIcon, TrashIcon, UploadIcon } from "../components/icons";
+import { ArchiveIcon, ChevronRightIcon, DownloadIcon, EditIcon, FileIcon, FolderIcon, MoveIcon, TrashIcon, UploadIcon } from "../components/icons";
 
 interface Props {
   server: Server | null;
@@ -18,8 +18,10 @@ export function Files({ server }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [busyName, setBusyName] = useState<string | null>(null);
+  const [actionPending, setActionPending] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const selectAllRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     if (!server) return;
@@ -40,8 +42,37 @@ export function Files({ server }: Props) {
   }, [server?.id]);
 
   useEffect(() => {
+    setSelected(new Set());
+  }, [server?.id, currentPath]);
+
+  useEffect(() => {
     load();
   }, [load]);
+
+  const allNames = entries.map((e) => e.name);
+  const allSelected = allNames.length > 0 && allNames.every((n) => selected.has(n));
+  const someSelected = allNames.some((n) => selected.has(n));
+  const selectedEntries = entries.filter((e) => selected.has(e.name));
+  const singleSelected = selectedEntries.length === 1 ? selectedEntries[0] : null;
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [someSelected, allSelected]);
+
+  function toggleOne(name: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(allNames));
+  }
 
   async function handleUpload(files: FileList | null) {
     if (!server || !files || files.length === 0) return;
@@ -60,25 +91,28 @@ export function Files({ server }: Props) {
     }
   }
 
-  async function handleRename(entry: FileEntry) {
-    if (!server) return;
+  async function handleRenameSelected() {
+    if (!server || !singleSelected) return;
+    const entry = singleSelected;
     const newName = window.prompt("新しい名前を入力してください。", entry.name);
     if (!newName || newName === entry.name) return;
 
-    setBusyName(entry.name);
+    setActionPending(true);
     setError(null);
     try {
       await renameFile(server.id, joinPath(currentPath, entry.name), joinPath(currentPath, newName));
       await load();
+      setSelected(new Set());
     } catch (err) {
       setError(err instanceof Error && err.message === "destination_exists" ? "同名のファイル/フォルダが既に存在します。" : "名前変更に失敗しました。");
     } finally {
-      setBusyName(null);
+      setActionPending(false);
     }
   }
 
-  async function handleMove(entry: FileEntry) {
-    if (!server) return;
+  async function handleMoveSelected() {
+    if (!server || !singleSelected) return;
+    const entry = singleSelected;
     const currentFullPath = joinPath(currentPath, entry.name);
     const newFullPath = window.prompt(
       "移動先のパスを入力してください（フォルダも含めて指定できます）。",
@@ -86,32 +120,40 @@ export function Files({ server }: Props) {
     );
     if (!newFullPath || newFullPath === currentFullPath) return;
 
-    setBusyName(entry.name);
+    setActionPending(true);
     setError(null);
     try {
       await renameFile(server.id, currentFullPath, newFullPath);
       await load();
+      setSelected(new Set());
     } catch (err) {
       setError(err instanceof Error && err.message === "destination_exists" ? "移動先に同名のファイル/フォルダが既に存在します。" : "移動に失敗しました。");
     } finally {
-      setBusyName(null);
+      setActionPending(false);
     }
   }
 
-  async function handleDelete(entry: FileEntry) {
-    if (!server) return;
-    if (!window.confirm(`「${entry.name}」を削除します。よろしいですか？\n（.trash フォルダへ退避されます）`)) return;
+  async function handleDeleteSelected() {
+    if (!server || selectedEntries.length === 0) return;
+    const count = selectedEntries.length;
+    const message =
+      count === 1
+        ? `「${selectedEntries[0].name}」を削除します。よろしいですか？\n（.trash フォルダへ退避されます）`
+        : `${count}件を削除します。よろしいですか？\n（.trash フォルダへ退避されます）`;
+    if (!window.confirm(message)) return;
 
-    setBusyName(entry.name);
+    setActionPending(true);
     setError(null);
-    try {
-      await deleteFile(server.id, joinPath(currentPath, entry.name));
-      await load();
-    } catch {
-      setError("削除に失敗しました。");
-    } finally {
-      setBusyName(null);
+    const results = await Promise.allSettled(
+      selectedEntries.map((entry) => deleteFile(server.id, joinPath(currentPath, entry.name))),
+    );
+    const failed = results.filter((r) => r.status === "rejected").length;
+    if (failed > 0) {
+      setError(`${count}件中${failed}件の削除に失敗しました。`);
     }
+    await load();
+    setSelected(new Set());
+    setActionPending(false);
   }
 
   if (!server) {
@@ -119,6 +161,16 @@ export function Files({ server }: Props) {
   }
 
   const breadcrumbSegments = currentPath ? currentPath.split("/") : [];
+
+  const canDownload = singleSelected !== null;
+  const canRenameMove = singleSelected !== null;
+  const canDelete = selectedEntries.length >= 1;
+  const isDirSelected = singleSelected?.type === "directory";
+  const downloadHref = !canDownload
+    ? undefined
+    : isDirSelected
+      ? downloadZipUrl(server.id, joinPath(currentPath, singleSelected.name))
+      : downloadUrl(server.id, joinPath(currentPath, singleSelected.name));
 
   return (
     <div className="files">
@@ -137,10 +189,44 @@ export function Files({ server }: Props) {
           ))}
         </nav>
         <div className="files-toolbar-actions">
-          <a className="btn btn-sm btn-outline" href={downloadZipUrl(server.id, currentPath)}>
-            <ArchiveIcon />
-            このフォルダをZIPでDL
-          </a>
+          {selected.size > 0 && <span className="selection-count">{selected.size}件選択中</span>}
+          <div className="selection-actions">
+            <a
+              className={`btn btn-sm btn-outline${!canDownload || actionPending ? " btn-disabled-link" : ""}`}
+              href={canDownload && !actionPending ? downloadHref : undefined}
+              aria-disabled={!canDownload || actionPending}
+              onClick={(e) => {
+                if (!canDownload || actionPending) e.preventDefault();
+              }}
+            >
+              {isDirSelected ? <ArchiveIcon /> : <DownloadIcon />}
+              {isDirSelected ? "ZIPダウンロード" : "ダウンロード"}
+            </a>
+            <button
+              className="btn btn-sm btn-outline"
+              disabled={!canRenameMove || actionPending}
+              onClick={handleRenameSelected}
+            >
+              <EditIcon />
+              名前変更
+            </button>
+            <button
+              className="btn btn-sm btn-outline"
+              disabled={!canRenameMove || actionPending}
+              onClick={handleMoveSelected}
+            >
+              <MoveIcon />
+              移動
+            </button>
+            <button
+              className="btn btn-sm btn-danger"
+              disabled={!canDelete || actionPending}
+              onClick={handleDeleteSelected}
+            >
+              <TrashIcon />
+              削除
+            </button>
+          </div>
           <label className="btn btn-sm btn-primary upload-button">
             <UploadIcon />
             {uploading ? "アップロード中..." : "アップロード"}
@@ -161,10 +247,19 @@ export function Files({ server }: Props) {
         <table className="file-table">
           <thead>
             <tr>
+              <th className="col-checkbox">
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  disabled={entries.length === 0}
+                  aria-label="すべて選択"
+                />
+              </th>
               <th>名前</th>
               <th>サイズ</th>
               <th>更新日時</th>
-              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -181,6 +276,14 @@ export function Files({ server }: Props) {
             {!loading &&
               entries.map((entry) => (
                 <tr key={entry.name}>
+                  <td className="col-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(entry.name)}
+                      onChange={() => toggleOne(entry.name)}
+                      aria-label={`${entry.name}を選択`}
+                    />
+                  </td>
                   <td>
                     {entry.type === "directory" ? (
                       <button
@@ -202,45 +305,6 @@ export function Files({ server }: Props) {
                   </td>
                   <td className="col-size">{entry.type === "file" ? formatBytes(entry.size) : "-"}</td>
                   <td className="col-mtime">{formatDateTime(entry.mtime)}</td>
-                  <td className="file-row-actions">
-                    {entry.type === "directory" && (
-                      <a
-                        className="btn btn-icon btn-ghost"
-                        title="ZIPでダウンロード"
-                        aria-label="ZIPでダウンロード"
-                        href={downloadZipUrl(server.id, joinPath(currentPath, entry.name))}
-                      >
-                        <ArchiveIcon />
-                      </a>
-                    )}
-                    <button
-                      className="btn btn-icon btn-ghost"
-                      title="名前変更"
-                      aria-label="名前変更"
-                      disabled={busyName !== null}
-                      onClick={() => handleRename(entry)}
-                    >
-                      <EditIcon />
-                    </button>
-                    <button
-                      className="btn btn-icon btn-ghost"
-                      title="移動"
-                      aria-label="移動"
-                      disabled={busyName !== null}
-                      onClick={() => handleMove(entry)}
-                    >
-                      <MoveIcon />
-                    </button>
-                    <button
-                      className="btn btn-icon btn-ghost danger-hover"
-                      title="削除"
-                      aria-label="削除"
-                      disabled={busyName !== null}
-                      onClick={() => handleDelete(entry)}
-                    >
-                      <TrashIcon />
-                    </button>
-                  </td>
                 </tr>
               ))}
           </tbody>
