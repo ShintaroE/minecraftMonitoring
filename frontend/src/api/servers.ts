@@ -3,6 +3,7 @@ export interface Server {
   containerName: string;
   displayName: string;
   dataPath: string;
+  gamePort: number | null;
   state: string;
   sortOrder: number;
   isArchived: boolean;

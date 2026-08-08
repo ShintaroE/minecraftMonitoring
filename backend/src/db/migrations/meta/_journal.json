@@ -15,6 +15,13 @@
       "when": 1785754688609,
       "tag": "0001_even_sue_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786199398352,
+      "tag": "0002_brown_bloodstorm",
+      "breakpoints": true
     }
   ]
 }

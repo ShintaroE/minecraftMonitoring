@@ -6,6 +6,7 @@ export const servers = pgTable("servers", {
   containerName: text("container_name").notNull().unique(),
   displayName: text("display_name").notNull(),
   dataPath: text("data_path").notNull(),
+  gamePort: integer("game_port"),
   rconHost: text("rcon_host"),
   rconPort: integer("rcon_port"),
   sortOrder: integer("sort_order").notNull().default(0),

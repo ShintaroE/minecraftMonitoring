@@ -4,12 +4,15 @@ import { Mods } from "./pages/Mods";
 import { Files } from "./pages/Files";
 import { ServerSwitcher } from "./components/ServerSwitcher";
 import { ServerControls } from "./components/ServerControls";
+import { AccessAddress } from "./components/AccessAddress";
 import { useServers } from "./hooks/useServers";
+import { useConfig } from "./hooks/useConfig";
 
 type Tab = "dashboard" | "mods" | "files";
 
 function App() {
   const { servers, loading: serversLoading, refresh: refreshServers } = useServers();
+  const config = useConfig();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("dashboard");
   const selectedServer = servers.find((s) => s.id === selectedId) ?? null;
@@ -47,6 +50,7 @@ function App() {
             selectedId={selectedId}
             onSelect={setSelectedId}
           />
+          <AccessAddress server={selectedServer} publicHost={config?.publicHost ?? null} />
           <ServerControls server={selectedServer} onChanged={refreshServers} />
         </div>
       </header>

@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { env } from "../env.js";
 import { getServerById } from "../services/serverLookup.js";
 import { discoverAndSyncServers } from "../services/serverDiscovery.js";
 import { startContainer, stopContainer, restartContainer } from "../services/dockerControl.js";
@@ -36,6 +37,10 @@ function controlHandler(action: (containerName: string) => Promise<void>) {
 }
 
 export async function serverRoutes(app: FastifyInstance) {
+  app.get("/api/config", async () => {
+    return { publicHost: env.PUBLIC_HOST };
+  });
+
   app.get("/api/servers", async () => {
     return discoverAndSyncServers();
   });

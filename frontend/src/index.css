@@ -316,9 +316,41 @@ select {
   outline: none;
 }
 
+/* ブラウザネイティブ描画のオプション一覧は select 側の `background: transparent` を
+   引き継がないため、色を明示しないと(特にダークモードで)文字と背景が同化して読めなくなる。 */
+.server-switcher option {
+  background: var(--surface);
+  color: var(--text-strong);
+}
+
 .server-switcher-empty {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+/* ---------- Access address ---------- */
+
+.access-address {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.access-address:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.access-address-value {
+  font-variant-numeric: tabular-nums;
 }
 
 .server-controls {

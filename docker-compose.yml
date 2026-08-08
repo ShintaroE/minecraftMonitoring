@@ -47,6 +47,7 @@ services:
       PORT: 3000
       SHARED_ROOT: /mnt/docker-root
       MOD_BACKUP_ROOT: /app/data/mod-backups
+      PUBLIC_HOST: ${PUBLIC_HOST}
     volumes:
       # 親ディレクトリを丸ごとマウント（新サーバー追加時にmount追記不要にするため。plan.md 3.3章参照）
       - /home/maki/docker:/mnt/docker-root

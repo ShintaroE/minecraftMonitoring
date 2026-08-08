@@ -8,6 +8,7 @@ const envSchema = z.object({
   DOCKER_PROXY_PORT: z.coerce.number().default(2375),
   SHARED_ROOT: z.string().default("/mnt/docker-root"),
   MOD_BACKUP_ROOT: z.string().default("/app/data/mod-backups"),
+  PUBLIC_HOST: z.string().default(""),
 });
 
 export const env = envSchema.parse(process.env);
